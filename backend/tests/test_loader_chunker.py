@@ -22,7 +22,7 @@ def test_load_test_facts_with_metadata() -> None:
 
 
 def test_chunking_is_deterministic_and_traceable() -> None:
-    pages = load_documents(KNOWLEDGE_BASE)
+    pages = load_documents(KNOWLEDGE_BASE / "test_facts.txt")
     first = chunk_documents(pages, chunk_size=220, chunk_overlap=40)
     second = chunk_documents(pages, chunk_size=220, chunk_overlap=40)
 
