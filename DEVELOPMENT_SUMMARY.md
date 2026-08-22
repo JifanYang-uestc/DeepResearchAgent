@@ -15,6 +15,7 @@
 - 工程 Retrieval：四个指定 Query 均 Top-1 命中预期事实。
 - 自动测试：21 passed；唯一 warning 来自 `hello-agents` 对 Pydantic V2 旧式 Config 的弃用提示。
 - 真实语料：RAG、ReAct、Self-RAG 三个定向 Query 均 Top-1 命中对应 PDF；跨文档检索覆盖三篇论文。
+- Research Test C：Planner 生成 5 个 TODO 与 5 个不同 Query；5 个任务全部完成；Knowledge 来源覆盖 `rag_2020.pdf`、`react.pdf`、`self_rag.pdf`，同时收集 25 个 Web 来源；最终报告 8,907 字符且同时含 `[Knowledge]` / `[Web]`，SSE 正常以 `done` 结束。
 - 前端：TypeScript 检查与 Vite production build 通过。
 
 ## V1 明确未实现
