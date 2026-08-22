@@ -19,10 +19,11 @@ dependencies = [
     "ddgs>=9.6.1",
     "loguru>=0.7.3",
     "huggingface-hub",
+    "pypdf>=5.0.0",
 ]
 
 [project.optional-dependencies]
-dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+dev = ["mypy>=1.11.1", "pytest>=8.0.0", "ruff>=0.6.1"]
 
 [build-system]
 requires = ["setuptools>=73.0.0", "wheel"]
@@ -63,5 +64,6 @@ convention = "google"
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
     "ruff>=0.12.7",
 ]
