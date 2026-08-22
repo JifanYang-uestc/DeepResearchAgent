@@ -120,6 +120,43 @@ class PlanningService:
                     if isinstance(item, dict):
                         tasks.append(item)
 
+        if not tasks:
+            tasks.extend(self._extract_note_task_payloads(text))
+
+        return tasks
+
+    def _extract_note_task_payloads(self, text: str) -> List[dict[str, Any]]:
+        """Recover TODOs from individual note tool calls with nested JSON arrays."""
+
+        marker = "[TOOL_CALL:note:"
+        lowered = text.lower()
+        decoder = json.JSONDecoder()
+        tasks: List[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        cursor = 0
+
+        while True:
+            marker_index = lowered.find(marker.lower(), cursor)
+            if marker_index == -1:
+                break
+            payload_start = marker_index + len(marker)
+            try:
+                payload, consumed = decoder.raw_decode(text[payload_start:].lstrip())
+            except json.JSONDecodeError:
+                cursor = payload_start
+                continue
+            cursor = payload_start + consumed
+
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("note_type") != "task_state" or not payload.get("title"):
+                continue
+            task_identity = str(payload.get("task_id") or payload.get("title"))
+            if task_identity in seen_ids:
+                continue
+            seen_ids.add(task_identity)
+            tasks.append(payload)
+
         return tasks
 
     def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:

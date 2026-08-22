@@ -38,3 +38,21 @@ def test_note_payloads_produce_distinct_retrieval_queries() -> None:
     assert tasks[0].query != tasks[1].query
     assert "传统RAG基础" in tasks[0].query
     assert "ReAct范式" in tasks[1].query
+
+
+class FakeToolCallPlannerAgent(FakePlannerAgent):
+    def run(self, prompt: str) -> str:
+        return """
+        [TOOL_CALL:note:{"action":"create","task_id":1,"title":"RAG基础","note_type":"task_state","tags":["deep_research","task_1"],"content":"研究 parametric and non-parametric memory"}]
+        [TOOL_CALL:note:{"action":"create","task_id":2,"title":"ReAct范式","note_type":"task_state","tags":["deep_research","task_2"],"content":"研究 reasoning and acting interaction"}]
+        """
+
+
+def test_individual_note_tool_calls_are_recovered_as_todos() -> None:
+    planner = PlanningService(FakeToolCallPlannerAgent(), Configuration())  # type: ignore[arg-type]
+    state = SummaryState(research_topic="对比 RAG 与 ReAct")
+
+    tasks = planner.plan_todo_list(state)
+
+    assert [task.title for task in tasks] == ["RAG基础", "ReAct范式"]
+    assert len({task.query for task in tasks}) == 2
