@@ -63,7 +63,15 @@ def _features(text: str) -> list[tuple[str, float]]:
     features: list[tuple[str, float]] = []
 
     latin_tokens = _LATIN_TOKEN.findall(normalized)
-    features.extend((f"w:{token}", 2.0) for token in latin_tokens)
+    for token in latin_tokens:
+        features.append((f"w:{token}", 2.0))
+        canonical = re.sub(r"[-_.]+", "-", token)
+        features.append((f"wc:{canonical}", 2.0))
+        features.extend(
+            (f"wp:{part}", 1.0)
+            for part in re.split(r"[-_.]+", token)
+            if part
+        )
     features.extend(
         (f"wb:{left}|{right}", 1.2)
         for left, right in zip(latin_tokens, latin_tokens[1:])

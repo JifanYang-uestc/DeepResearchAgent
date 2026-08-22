@@ -46,8 +46,20 @@ class PlanningService:
 
         for idx, item in enumerate(tasks_payload, start=1):
             title = str(item.get("title") or f"任务{idx}").strip()
-            intent = str(item.get("intent") or "聚焦主题的关键问题").strip()
-            query = str(item.get("query") or state.research_topic).strip()
+            note_content = str(item.get("content") or "").strip()
+            intent = str(
+                item.get("intent")
+                or note_content
+                or "聚焦主题的关键问题"
+            ).strip()
+            query = str(item.get("query") or "").strip()
+
+            # Tool-aware planners can return the task notes they just created
+            # instead of repeating the final TODO schema. Preserve the useful
+            # task boundaries and derive a distinct retrieval query from each
+            # note rather than falling back every task to the full user topic.
+            if not query and note_content:
+                query = f"{title} {note_content[:240]}".strip()
 
             if not query:
                 query = state.research_topic

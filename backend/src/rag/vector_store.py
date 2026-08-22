@@ -13,6 +13,7 @@ from .types import KnowledgeChunk, RetrievalResult
 
 INDEX_FILENAME = "knowledge.faiss"
 METADATA_FILENAME = "metadata.json"
+INDEX_VERSION = 2
 
 
 class FaissVectorStore:
@@ -34,7 +35,7 @@ class FaissVectorStore:
 
         if not chunks:
             raise ValueError("Cannot build a knowledge index without chunks")
-        vectors = self.embedding.embed_many(chunk.content for chunk in chunks)
+        vectors = self.embedding.embed_many(_embedding_text(chunk) for chunk in chunks)
         index = faiss.IndexFlatIP(self.embedding.dimensions)
         index.add(vectors)
         self._index = index
@@ -50,7 +51,7 @@ class FaissVectorStore:
         target.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, str(target / INDEX_FILENAME))
         payload = {
-            "version": 1,
+            "version": INDEX_VERSION,
             "embedding": self.embedding.fingerprint,
             "dimensions": self.embedding.dimensions,
             "count": len(self._chunks),
@@ -74,6 +75,8 @@ class FaissVectorStore:
             raise FileNotFoundError(f"Knowledge index is incomplete: {source}")
 
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if payload.get("version") != INDEX_VERSION:
+            raise ValueError("Knowledge index version is incompatible; rebuild it")
         if payload.get("embedding") != self.embedding.fingerprint:
             raise ValueError("Knowledge index was created with a different embedding")
         chunks = [KnowledgeChunk.from_dict(item) for item in payload.get("chunks", [])]
@@ -107,3 +110,10 @@ class FaissVectorStore:
                 )
             )
         return results
+
+
+def _embedding_text(chunk: KnowledgeChunk) -> str:
+    """Add source identity so method-specific TODOs prefer their primary paper."""
+
+    document_identity = Path(chunk.document).stem.replace("_", " ").replace("-", " ")
+    return f"{document_identity} {document_identity} {document_identity}\n{chunk.content}"

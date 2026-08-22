@@ -42,6 +42,10 @@ def paper_retriever() -> KnowledgeRetriever:
             "react.pdf",
         ),
         (
+            "ReAct 范式 推理 reasoning 行动 acting 外部环境 interaction",
+            "react.pdf",
+        ),
+        (
             "Self-RAG reflection tokens adaptive retrieval critique self-reflection",
             "self_rag.pdf",
         ),

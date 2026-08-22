@@ -50,7 +50,7 @@ class KnowledgeService:
             store = FaissVectorStore()
             try:
                 store.load(index_path)
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 if not self._config.knowledge_auto_build:
                     raise
                 knowledge_path = _resolve_backend_path(self._config.knowledge_base_path)
