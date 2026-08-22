@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# Node
+node_modules/
+dist/
+
+# Logs
+*.log
+logs/
+
+# Runtime
+notes/
+workspace/
+
+# RAG generated data
+vector_store/
+faiss_index/
+*.faiss
+*.index
+
+# Large local knowledge documents
+knowledge_base/*.pdf
+knowledge_base/*.docx
+
+# Local reference checkout (not part of the application runtime)
+hello-agents-source/
+
+# OS
+.DS_Store
+Thumbs.db
