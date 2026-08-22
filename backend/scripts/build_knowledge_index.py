@@ -17,6 +17,8 @@ from rag.vector_store import FaissVectorStore
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--knowledge-base", type=Path, default=BACKEND_DIR / "knowledge_base")
     parser.add_argument("--index-dir", type=Path, default=BACKEND_DIR / "vector_store")
