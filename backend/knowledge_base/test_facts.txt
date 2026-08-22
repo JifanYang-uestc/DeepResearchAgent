@@ -1,0 +1,17 @@
+DeepResearchAgent 项目内部测试知识
+
+项目内部测试代号为 ResearchX-2026。
+
+ResearchX-2026 当前采用 Planner、Retriever、Summarizer 和 Writer 四阶段研究流程。
+
+ResearchX-2026 的本地知识库默认 Top-K 设置为 5。
+
+测试知识库负责人代号为 Alpha。
+
+项目 V1 的核心目标是融合本地 Knowledge Retrieval 与实时 Web Search。
+
+系统规定，当本地 Knowledge RAG 不可用时，研究任务必须允许退化到 Web Search。
+
+系统规定，当 Web Search 不可用但本地知识库存在有效 Evidence 时，应继续执行 Summarizer。
+
+ResearchX-2026 的测试知识库使用 FAISS 作为 V1 Vector Store。

@@ -46,8 +46,20 @@ class PlanningService:
 
         for idx, item in enumerate(tasks_payload, start=1):
             title = str(item.get("title") or f"任务{idx}").strip()
-            intent = str(item.get("intent") or "聚焦主题的关键问题").strip()
-            query = str(item.get("query") or state.research_topic).strip()
+            note_content = str(item.get("content") or "").strip()
+            intent = str(
+                item.get("intent")
+                or note_content
+                or "聚焦主题的关键问题"
+            ).strip()
+            query = str(item.get("query") or "").strip()
+
+            # Tool-aware planners can return the task notes they just created
+            # instead of repeating the final TODO schema. Preserve the useful
+            # task boundaries and derive a distinct retrieval query from each
+            # note rather than falling back every task to the full user topic.
+            if not query and note_content:
+                query = f"{title} {note_content[:240]}".strip()
 
             if not query:
                 query = state.research_topic
@@ -107,6 +119,43 @@ class PlanningService:
                 for item in tool_payload["tasks"]:
                     if isinstance(item, dict):
                         tasks.append(item)
+
+        if not tasks:
+            tasks.extend(self._extract_note_task_payloads(text))
+
+        return tasks
+
+    def _extract_note_task_payloads(self, text: str) -> List[dict[str, Any]]:
+        """Recover TODOs from individual note tool calls with nested JSON arrays."""
+
+        marker = "[TOOL_CALL:note:"
+        lowered = text.lower()
+        decoder = json.JSONDecoder()
+        tasks: List[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        cursor = 0
+
+        while True:
+            marker_index = lowered.find(marker.lower(), cursor)
+            if marker_index == -1:
+                break
+            payload_start = marker_index + len(marker)
+            try:
+                payload, consumed = decoder.raw_decode(text[payload_start:].lstrip())
+            except json.JSONDecodeError:
+                cursor = payload_start
+                continue
+            cursor = payload_start + consumed
+
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("note_type") != "task_state" or not payload.get("title"):
+                continue
+            task_identity = str(payload.get("task_id") or payload.get("title"))
+            if task_identity in seen_ids:
+                continue
+            seen_ids.add(task_identity)
+            tasks.append(payload)
 
         return tasks
 

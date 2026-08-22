@@ -46,6 +46,49 @@ class Configuration(BaseModel):
         title="Notes Workspace",
         description="Directory for NoteTool to persist task notes",
     )
+    enable_knowledge_rag: bool = Field(
+        default=True,
+        title="Enable Knowledge RAG",
+        description="Retrieve evidence from the local knowledge base",
+    )
+    knowledge_base_path: str = Field(
+        default="./knowledge_base",
+        title="Knowledge Base Path",
+        description="Directory containing PDF, text, and Markdown knowledge documents",
+    )
+    knowledge_index_path: str = Field(
+        default="./vector_store",
+        title="Knowledge Index Path",
+        description="Directory used for persisted FAISS index data",
+    )
+    knowledge_top_k: int = Field(
+        default=5,
+        ge=1,
+        title="Knowledge Top K",
+        description="Number of local chunks retrieved for each research task",
+    )
+    knowledge_minimum_score: float = Field(
+        default=0.0,
+        title="Knowledge Minimum Score",
+        description="Minimum cosine score accepted as local evidence",
+    )
+    knowledge_chunk_size: int = Field(
+        default=800,
+        ge=100,
+        title="Knowledge Chunk Size",
+        description="Maximum characters per local knowledge chunk",
+    )
+    knowledge_chunk_overlap: int = Field(
+        default=120,
+        ge=0,
+        title="Knowledge Chunk Overlap",
+        description="Overlapping characters between adjacent chunks",
+    )
+    knowledge_auto_build: bool = Field(
+        default=True,
+        title="Knowledge Auto Build",
+        description="Build the FAISS index on first use when it is missing",
+    )
     fetch_full_page: bool = Field(
         default=True,
         title="Fetch Full Page",
@@ -115,6 +158,14 @@ class Configuration(BaseModel):
             "search_api": os.getenv("SEARCH_API"),
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
+            "enable_knowledge_rag": os.getenv("ENABLE_KNOWLEDGE_RAG"),
+            "knowledge_base_path": os.getenv("KNOWLEDGE_BASE_PATH"),
+            "knowledge_index_path": os.getenv("KNOWLEDGE_INDEX_PATH"),
+            "knowledge_top_k": os.getenv("KNOWLEDGE_TOP_K"),
+            "knowledge_minimum_score": os.getenv("KNOWLEDGE_MINIMUM_SCORE"),
+            "knowledge_chunk_size": os.getenv("KNOWLEDGE_CHUNK_SIZE"),
+            "knowledge_chunk_overlap": os.getenv("KNOWLEDGE_CHUNK_OVERLAP"),
+            "knowledge_auto_build": os.getenv("KNOWLEDGE_AUTO_BUILD"),
         }
 
         for key, value in env_aliases.items():

@@ -245,14 +245,29 @@
                     :key="`${item.title}-${index}`"
                     class="source-item"
                   >
+                    <div class="source-heading">
+                      <span class="source-kind" :class="item.type">
+                        {{ item.type === "knowledge" ? "Knowledge" : "Web" }}
+                      </span>
                     <a
+                      v-if="item.url"
                       class="source-link"
-                      :href="item.url || '#'"
+                      :href="item.url"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
                       {{ item.title || item.url || `来源 ${index + 1}` }}
                     </a>
+                    <span v-else class="source-title">
+                      {{ item.title || item.document || `来源 ${index + 1}` }}
+                    </span>
+                    </div>
+                    <p v-if="item.type === 'knowledge'" class="source-meta">
+                      {{ item.page ? `Page ${item.page} · ` : "" }}Chunk {{ item.chunkId || "N/A" }}
+                      <template v-if="item.score !== null && item.score !== undefined">
+                        · Score {{ item.score.toFixed(4) }}
+                      </template>
+                    </p>
                     <div v-if="item.snippet || item.raw" class="source-tooltip">
                       <p v-if="item.snippet">{{ item.snippet }}</p>
                       <p v-if="item.raw" class="muted-text">{{ item.raw }}</p>
@@ -344,10 +359,15 @@ import {
 } from "./services/api";
 
 interface SourceItem {
+  type: "knowledge" | "web";
   title: string;
   url: string;
   snippet: string;
   raw: string;
+  document?: string;
+  page?: number | null;
+  chunkId?: string;
+  score?: number | null;
 }
 
 interface ToolCallLog {
@@ -469,10 +489,15 @@ function parseSources(raw: string): SourceItem[] {
       return;
     }
     const normalized: SourceItem = {
+      type: current.type || "web",
       title: current.title?.trim() || "",
       url: current.url?.trim() || "",
       snippet: current.snippet ? truncate(current.snippet) : "",
-      raw: current.raw ? truncate(current.raw, 420) : ""
+      raw: current.raw ? truncate(current.raw, 420) : "",
+      document: current.document,
+      page: current.page,
+      chunkId: current.chunkId,
+      score: current.score
     };
 
     if (
@@ -491,7 +516,7 @@ function parseSources(raw: string): SourceItem[] {
 
   const ensureCurrent = () => {
     if (!current) {
-      current = { title: "", url: "", snippet: "", raw: "" };
+      current = { type: "web", title: "", url: "", snippet: "", raw: "" };
     }
   };
 
@@ -506,7 +531,8 @@ function parseSources(raw: string): SourceItem[] {
       const withoutBullet = trimmed.replace(/^\*\s*/, "");
       const [titlePart, urlPart] = withoutBullet.split(" : ");
       current = {
-        title: titlePart?.trim() || "",
+        type: withoutBullet.includes("[Knowledge]") ? "knowledge" : "web",
+        title: titlePart?.replace(/^\[(Knowledge|Web)\]\s*/, "").trim() || "",
         url: urlPart?.trim() || "",
         snippet: "",
         raw: ""
@@ -518,6 +544,7 @@ function parseSources(raw: string): SourceItem[] {
       flush();
       const [, titlePart = ""] = trimmed.split(/:\s*(.+)/);
       current = {
+        type: "web",
         title: titlePart.trim(),
         url: "",
         snippet: "",
@@ -565,6 +592,29 @@ function parseSources(raw: string): SourceItem[] {
 
   flush();
   return items;
+}
+
+function normalizeSourceItems(value: unknown): SourceItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => ensureRecord(entry))
+    .filter((entry) => Object.keys(entry).length > 0)
+    .map((entry) => {
+      const type = entry.type === "knowledge" ? "knowledge" : "web";
+      return {
+        type,
+        title: typeof entry.title === "string" ? entry.title : "",
+        url: typeof entry.url === "string" ? entry.url : "",
+        snippet: typeof entry.snippet === "string" ? entry.snippet : "",
+        raw: "",
+        document: typeof entry.document === "string" ? entry.document : "",
+        page: typeof entry.page === "number" ? entry.page : null,
+        chunkId: typeof entry.chunk_id === "string" ? entry.chunk_id : "",
+        score: typeof entry.score === "number" ? entry.score : null
+      } as SourceItem;
+    });
 }
 
 function extractOptionalString(value: unknown): string | null {
@@ -802,7 +852,10 @@ const handleSubmit = async () => {
               event.sources_summary.trim()
             ) {
               task.sourcesSummary = event.sources_summary.trim();
-              task.sourceItems = parseSources(task.sourcesSummary);
+              const structured = normalizeSourceItems(payload.sources);
+              task.sourceItems = structured.length
+                ? structured
+                : parseSources(task.sourcesSummary);
             }
             progressLogs.value.push(`完成任务：${task.title}`);
             if (activeTaskId.value === task.id) {
@@ -833,7 +886,10 @@ const handleSubmit = async () => {
 
           if (latestText) {
             task.sourcesSummary = latestText;
-            task.sourceItems = parseSources(latestText);
+            const structured = normalizeSourceItems(payload.sources);
+            task.sourceItems = structured.length
+              ? structured
+              : parseSources(latestText);
             if (activeTaskId.value === task.id) {
               pulse(sourcesHighlight);
             }
@@ -1944,6 +2000,45 @@ select:focus {
   display: inline-flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.source-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source-kind {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.source-kind.knowledge {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.source-kind.web {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.source-title {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.source-meta {
+  margin: 0 0 0 2px;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .source-link {

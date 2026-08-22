@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
 .venv/
@@ -36,8 +37,8 @@ faiss_index/
 *.index
 
 # Large local knowledge documents
-knowledge_base/*.pdf
-knowledge_base/*.docx
+**/knowledge_base/*.pdf
+**/knowledge_base/*.docx
 
 # Local reference checkout (not part of the application runtime)
 hello-agents-source/

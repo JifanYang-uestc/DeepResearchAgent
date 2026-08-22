@@ -78,6 +78,7 @@ task_summarizer_instructions = """
 - 使用 Markdown 输出；
 - 以小节标题开头："任务总结"；
 - 关键发现使用有序或无序列表表达；
+- 每条关键事实应尽量保留可追溯引用：本地资料使用 `[Knowledge] 文档名 (Page/Chunk)`，互联网资料使用 `[Web] 标题 (URL)`；
 - 若任务无有效结果，输出"暂无可用信息"。
 - 最终呈现给用户的总结中禁止包含 `[TOOL_CALL:...]` 指令。
 </FORMAT>
@@ -100,6 +101,7 @@ report_writer_instructions = """
 - 各部分明确分节，禁止添加额外的封面或结语；
 - 若某部分信息缺失，说明"暂无相关信息"；
 - 引用来源时使用任务标题或来源标题，确保可追溯。
+- 必须在正文与“参考来源”中区分 `[Knowledge]` 和 `[Web]`；本地引用保留文档名、页码/Chunk ID，Web 引用保留 URL。
 - 输出给用户的内容中禁止残留 `[TOOL_CALL:...]` 指令。
 </REQUIREMENTS>
 

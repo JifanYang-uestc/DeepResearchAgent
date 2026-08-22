@@ -22,7 +22,8 @@ from prompts import (
 from models import SummaryState, SummaryStateOutput, TodoItem
 from services.planner import PlanningService
 from services.reporter import ReportingService
-from services.search import dispatch_search, prepare_research_context
+from services.knowledge import KnowledgeService
+from services.research import gather_research_evidence
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
 
@@ -71,6 +72,7 @@ class DeepResearchAgent:
         self.planner = PlanningService(self.todo_agent, self.config)
         self.summarizer = SummarizationService(self._summarizer_factory, self.config)
         self.reporting = ReportingService(self.report_agent, self.config)
+        self.knowledge = KnowledgeService(self.config)
         self._last_search_notices: list[str] = []
 
     # ------------------------------------------------------------------
@@ -297,13 +299,14 @@ class DeepResearchAgent:
         """Run search + summarization for a single task."""
         task.status = "in_progress"
 
-        search_result, notices, answer_text, backend = dispatch_search(
+        evidence = gather_research_evidence(
             task.query,
             self.config,
             state.research_loop_count,
+            self.knowledge,
         )
-        self._last_search_notices = notices
-        task.notices = notices
+        self._last_search_notices = evidence.notices
+        task.notices = evidence.notices
 
         if emit_stream:
             for event in self._drain_tool_events(state, step=step):
@@ -311,8 +314,8 @@ class DeepResearchAgent:
         else:
             self._drain_tool_events(state)
 
-        if notices and emit_stream:
-            for notice in notices:
+        if evidence.notices and emit_stream:
+            for notice in evidence.notices:
                 if notice:
                     yield {
                         "type": "status",
@@ -321,7 +324,7 @@ class DeepResearchAgent:
                         "step": step,
                     }
 
-        if not search_result or not search_result.get("results"):
+        if not evidence.available:
             task.status = "skipped"
             if emit_stream:
                 for event in self._drain_tool_events(state, step=step):
@@ -343,13 +346,11 @@ class DeepResearchAgent:
             if not emit_stream:
                 self._drain_tool_events(state)
 
-        sources_summary, context = prepare_research_context(
-            search_result,
-            answer_text,
-            self.config,
-        )
+        sources_summary = evidence.sources_summary
+        context = evidence.context
 
         task.sources_summary = sources_summary
+        task.source_items = [source.to_dict() for source in evidence.sources]
 
         with self._state_lock:
             state.web_research_results.append(context)
@@ -367,7 +368,8 @@ class DeepResearchAgent:
                 "latest_sources": sources_summary,
                 "raw_context": context,
                 "step": step,
-                "backend": backend,
+                "backend": evidence.backend,
+                "sources": task.source_items,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
             }
@@ -405,6 +407,7 @@ class DeepResearchAgent:
                 "status": "completed",
                 "summary": task.summary,
                 "sources_summary": task.sources_summary,
+                "sources": task.source_items,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
                 "step": step,
@@ -439,6 +442,7 @@ class DeepResearchAgent:
             "status": task.status,
             "summary": task.summary,
             "sources_summary": task.sources_summary,
+            "sources": task.source_items,
             "note_id": task.note_id,
             "note_path": task.note_path,
             "stream_token": task.stream_token,
