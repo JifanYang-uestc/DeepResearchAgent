@@ -2,7 +2,7 @@
 
 import operator
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from typing_extensions import Annotated
 
@@ -18,6 +18,7 @@ class TodoItem:
     status: str = field(default="pending")
     summary: Optional[str] = field(default=None)
     sources_summary: Optional[str] = field(default=None)
+    source_items: list[dict[str, Any]] = field(default_factory=list)
     notices: list[str] = field(default_factory=list)
     note_id: Optional[str] = field(default=None)
     note_path: Optional[str] = field(default=None)

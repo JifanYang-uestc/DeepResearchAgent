@@ -51,7 +51,7 @@ def deduplicate_and_format_sources(
     for source in unique_sources.values():
         title = source.get("title") or source.get("url", "")
         content = source.get("content", "")
-        formatted_parts.append(f"信息来源: {title}\n\n")
+        formatted_parts.append(f"[Web Evidence]\n信息来源: {title}\n\n")
         formatted_parts.append(f"URL: {source.get('url', '')}\n\n")
         formatted_parts.append(f"信息内容: {content}\n\n")
 
@@ -78,7 +78,7 @@ def format_sources(search_results: Dict[str, Any] | None) -> str:
 
     results = search_results.get("results", [])
     return "\n".join(
-        f"* {item.get('title', item.get('url', ''))} : {item.get('url', '')}"
+        f"* [Web] {item.get('title', item.get('url', ''))} : {item.get('url', '')}"
         for item in results
         if item.get("url")
     )

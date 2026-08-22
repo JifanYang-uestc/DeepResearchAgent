@@ -350,6 +350,7 @@ class DeepResearchAgent:
         context = evidence.context
 
         task.sources_summary = sources_summary
+        task.source_items = [source.to_dict() for source in evidence.sources]
 
         with self._state_lock:
             state.web_research_results.append(context)
@@ -368,6 +369,7 @@ class DeepResearchAgent:
                 "raw_context": context,
                 "step": step,
                 "backend": evidence.backend,
+                "sources": task.source_items,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
             }
@@ -405,6 +407,7 @@ class DeepResearchAgent:
                 "status": "completed",
                 "summary": task.summary,
                 "sources_summary": task.sources_summary,
+                "sources": task.source_items,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
                 "step": step,
@@ -439,6 +442,7 @@ class DeepResearchAgent:
             "status": task.status,
             "summary": task.summary,
             "sources_summary": task.sources_summary,
+            "sources": task.source_items,
             "note_id": task.note_id,
             "note_path": task.note_path,
             "stream_token": task.stream_token,

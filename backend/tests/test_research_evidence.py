@@ -115,3 +115,6 @@ def test_dual_route_combines_evidence_and_sources() -> None:
     assert "https://example.com/trend" in bundle.sources_summary
     assert "Knowledge Evidence" in bundle.context
     assert "Web trend evidence" in bundle.context
+    assert [source.type for source in bundle.sources] == ["knowledge", "web"]
+    assert bundle.sources[0].chunk_id == "chunk-local"
+    assert bundle.sources[1].url == "https://example.com/trend"

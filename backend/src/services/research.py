@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from config import Configuration
 from rag.types import RetrievalResult
@@ -17,6 +17,34 @@ WebSearch = Callable[
 
 
 @dataclass(slots=True)
+class EvidenceSource:
+    """A structured, frontend-safe citation for one evidence item."""
+
+    type: Literal["knowledge", "web"]
+    title: str
+    snippet: str = ""
+    url: str = ""
+    document: str = ""
+    page: int | None = None
+    chunk_id: str = ""
+    score: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe citation payload."""
+
+        return {
+            "type": self.type,
+            "title": self.title,
+            "snippet": self.snippet,
+            "url": self.url,
+            "document": self.document,
+            "page": self.page,
+            "chunk_id": self.chunk_id,
+            "score": self.score,
+        }
+
+
+@dataclass(slots=True)
 class EvidenceBundle:
     """Combined local and web evidence for one research TODO."""
 
@@ -26,6 +54,7 @@ class EvidenceBundle:
     backend: str = "none"
     knowledge_results: list[RetrievalResult] = field(default_factory=list)
     web_result: dict[str, Any] | None = None
+    sources: list[EvidenceSource] = field(default_factory=list)
 
     @property
     def available(self) -> bool:
@@ -45,12 +74,15 @@ def gather_research_evidence(
     """Collect both routes independently so either one can keep research running."""
 
     knowledge_results, notices = knowledge.retrieve(query)
-    knowledge_sources, knowledge_context = _format_knowledge(knowledge_results)
+    knowledge_sources, knowledge_context, structured_knowledge = _format_knowledge(
+        knowledge_results
+    )
 
     web_result: dict[str, Any] | None = None
     web_sources = ""
     web_context = ""
     web_backend = "web"
+    structured_web: list[EvidenceSource] = []
     try:
         web_result, web_notices, answer_text, web_backend = web_search(
             query,
@@ -64,6 +96,7 @@ def gather_research_evidence(
                 answer_text,
                 config,
             )
+            structured_web = _web_sources(web_result)
     except Exception as exc:  # noqa: BLE001 - degradation boundary
         notices.append(f"Web Search 不可用，继续使用本地 Knowledge Evidence：{exc}")
 
@@ -82,12 +115,16 @@ def gather_research_evidence(
         backend="+".join(routes) if routes else "none",
         knowledge_results=knowledge_results,
         web_result=web_result,
+        sources=[*structured_knowledge, *structured_web],
     )
 
 
-def _format_knowledge(results: list[RetrievalResult]) -> tuple[str, str]:
+def _format_knowledge(
+    results: list[RetrievalResult],
+) -> tuple[str, str, list[EvidenceSource]]:
     source_lines: list[str] = []
     contexts: list[str] = []
+    sources: list[EvidenceSource] = []
     for result in results:
         chunk = result.chunk
         location = f"Page {chunk.page}" if chunk.page is not None else "Page N/A"
@@ -103,4 +140,28 @@ def _format_knowledge(results: list[RetrievalResult]) -> tuple[str, str]:
             f"Score: {result.score:.6f}\n"
             f"Content:\n{chunk.content}"
         )
-    return "\n".join(source_lines), "\n\n".join(contexts)
+        sources.append(
+            EvidenceSource(
+                type="knowledge",
+                title=chunk.document,
+                snippet=chunk.content,
+                document=chunk.document,
+                page=chunk.page,
+                chunk_id=chunk.chunk_id,
+                score=result.score,
+            )
+        )
+    return "\n".join(source_lines), "\n\n".join(contexts), sources
+
+
+def _web_sources(search_result: dict[str, Any]) -> list[EvidenceSource]:
+    return [
+        EvidenceSource(
+            type="web",
+            title=str(item.get("title") or item.get("url") or "Web source"),
+            url=str(item.get("url") or ""),
+            snippet=str(item.get("content") or item.get("raw_content") or ""),
+        )
+        for item in search_result.get("results", [])
+        if item.get("url")
+    ]
