@@ -8,6 +8,7 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = BACKEND_DIR / "src"
+DEFAULT_INDEX_DIR = BACKEND_DIR / "vector_store" / "debug-legacy"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
@@ -30,7 +31,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", nargs="*", help="Optional query; defaults to all four checks")
     parser.add_argument("--top-k", type=int, default=5)
-    parser.add_argument("--index-dir", type=Path, default=BACKEND_DIR / "vector_store")
+    parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIR)
     args = parser.parse_args()
 
     facts_path = BACKEND_DIR / "knowledge_base" / "test_facts.txt"

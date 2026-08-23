@@ -19,6 +19,14 @@ from rag.base import KnowledgeDocumentInfo
 
 logger = logging.getLogger(__name__)
 
+_CATALOG_CONCEPT_ALIASES = (
+    ("robotics", "robot", "机器人"),
+    ("humanoid", "人形"),
+    ("industry", "行业", "产业"),
+    ("market", "市场"),
+    ("report", "报告"),
+)
+
 
 class RetrievalRoute(str, Enum):
     """Available evidence routes for one research task."""
@@ -183,7 +191,7 @@ def _collect_signals(
     matched = tuple(
         entry.document
         for entry in catalog
-        if _document_matches(task_text, entry.document)
+        if _document_matches(task_text, entry)
     )
     explicit_filename = any(
         _normalize(entry.document) in task_text for entry in catalog
@@ -197,15 +205,30 @@ def _collect_signals(
     )
 
 
-def _document_matches(text: str, document: str) -> bool:
-    stem = _normalize(Path(document).stem)
+def _document_matches(text: str, entry: KnowledgeDocumentInfo) -> bool:
+    stem = _normalize(Path(entry.document).stem)
     aliases = {stem, stem.replace("_", " ").replace("-", " ")}
     aliases.update(
         part
         for part in re.split(r"[^a-z0-9\u3400-\u9fff]+", stem)
         if len(part) >= 3 and not part.isdigit()
     )
-    return any(alias and re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", text) for alias in aliases)
+    title = _normalize(entry.title or "")
+    if title:
+        aliases.add(title)
+        aliases.update(
+            part
+            for part in re.split(r"[^a-z0-9\u3400-\u9fff]+", title)
+            if len(part) >= 3 and not part.isdigit()
+        )
+        for concept_group in _CATALOG_CONCEPT_ALIASES:
+            if any(alias in title for alias in concept_group):
+                aliases.update(concept_group)
+    return any(
+        alias
+        and re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", text)
+        for alias in aliases
+    )
 
 
 def _deterministic_decision(

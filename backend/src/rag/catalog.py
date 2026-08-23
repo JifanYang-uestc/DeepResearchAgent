@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -28,12 +29,54 @@ def build_knowledge_catalog(path: str | Path) -> list[KnowledgeDocumentInfo]:
     catalog: list[KnowledgeDocumentInfo] = []
     for item in paths:
         suffix = item.suffix.lower()
-        pages = len(PdfReader(str(item)).pages) if suffix == ".pdf" else 1
+        reader = PdfReader(str(item)) if suffix == ".pdf" else None
+        pages = len(reader.pages) if reader is not None else 1
         catalog.append(
             KnowledgeDocumentInfo(
                 document=item.name,
                 file_type=suffix.lstrip("."),
                 pages=pages,
+                title=_extract_title(item, reader),
             )
         )
     return catalog
+
+
+def _extract_title(path: Path, reader: PdfReader | None) -> str | None:
+    suffix = path.suffix.lower()
+    if suffix in {".md", ".markdown"}:
+        text = path.read_text(encoding="utf-8-sig")
+        for line in text.splitlines():
+            match = re.match(r"^\s*#\s+(.+?)\s*$", line)
+            if match:
+                return _clean_title(match.group(1))
+        return None
+    if suffix == ".txt":
+        text = path.read_text(encoding="utf-8-sig")
+        return _first_title_line(text)
+    if suffix == ".pdf" and reader is not None and reader.pages:
+        text = reader.pages[0].extract_text() or ""
+        return _first_title_line(text, skip_document_noise=True)
+    return None
+
+
+def _first_title_line(text: str, *, skip_document_noise: bool = False) -> str | None:
+    for line in text.splitlines():
+        candidate = _clean_title(line)
+        if candidate is None:
+            continue
+        lowered = candidate.lower()
+        if skip_document_noise and (
+            lowered.startswith(("arxiv:", "doi:", "http://", "https://"))
+            or re.fullmatch(r"(?:page\s*)?\d+", lowered)
+        ):
+            continue
+        return candidate
+    return None
+
+
+def _clean_title(value: str) -> str | None:
+    candidate = " ".join(value.strip().lstrip("#").split())
+    if not 3 <= len(candidate) <= 200:
+        return None
+    return candidate

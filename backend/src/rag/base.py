@@ -15,6 +15,7 @@ class KnowledgeDocumentInfo:
     document: str
     file_type: str
     pages: int | None = None
+    title: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-safe catalog entry."""
@@ -23,6 +24,7 @@ class KnowledgeDocumentInfo:
             "document": self.document,
             "type": self.file_type,
             "pages": self.pages,
+            "title": self.title,
         }
 
 

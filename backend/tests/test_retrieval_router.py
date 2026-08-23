@@ -207,3 +207,26 @@ def test_mixed_topic_routes_each_todo_independently() -> None:
 
     assert theory.route is RetrievalRoute.KNOWLEDGE
     assert fresh.route in {RetrievalRoute.WEB, RetrievalRoute.HYBRID}
+
+
+def test_generic_filename_catalog_title_can_route_hybrid() -> None:
+    catalog = [
+        KnowledgeDocumentInfo(
+            document="document1.pdf",
+            file_type="pdf",
+            pages=42,
+            title="2026 Humanoid Robotics Industry Report",
+        )
+    ]
+    query = "2026 人形机器人市场发展趋势"
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=query,
+        task=_task(query),
+        knowledge_catalog=catalog,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route is RetrievalRoute.HYBRID
+    assert decision.knowledge_query == query
+    assert "document1.pdf" in decision.reason
