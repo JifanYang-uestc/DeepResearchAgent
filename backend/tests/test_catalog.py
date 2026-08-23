@@ -40,3 +40,12 @@ def test_catalog_extracts_pdf_title_from_first_page(monkeypatch, tmp_path: Path)
     assert entry.document == "document1.pdf"
     assert entry.pages == 2
     assert entry.title == "2026 Humanoid Robotics Industry Report"
+
+
+def test_corrupt_pdf_does_not_hide_valid_catalog_documents(tmp_path: Path) -> None:
+    (tmp_path / "notes.md").write_text("# Valid Notes\nbody", encoding="utf-8")
+    (tmp_path / "bad.pdf").write_bytes(b"not a pdf")
+
+    catalog = build_knowledge_catalog(tmp_path)
+
+    assert [entry.document for entry in catalog] == ["notes.md"]

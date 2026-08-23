@@ -121,6 +121,12 @@ def test_vector_backend_unavailable_falls_back_to_legacy() -> None:
     assert "vector backend unavailable" not in notices[0]
 
 
+def test_default_semantic_service_has_no_automatic_legacy_fallback() -> None:
+    service = KnowledgeService(Configuration(knowledge_backend="helloagents"))
+
+    assert service._fallback_backend is None
+
+
 def test_user_visible_notice_does_not_leak_raw_exception() -> None:
     sensitive = r"secret-token=abc123 path=C:\Users\test\model"
     service = KnowledgeService(

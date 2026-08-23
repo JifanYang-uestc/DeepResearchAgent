@@ -15,31 +15,44 @@ from config import Configuration
 from services.knowledge import KnowledgeService
 
 
-def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--knowledge-base", type=Path, default=BACKEND_DIR / "knowledge_base")
-    parser.add_argument("--index-dir", type=Path, default=BACKEND_DIR / "vector_store")
+    parser.add_argument("--knowledge-base", type=Path, default=None)
+    parser.add_argument("--index-dir", type=Path, default=None)
     parser.add_argument(
         "--backend",
         choices=("helloagents", "legacy_faiss"),
         default=None,
         help="Override KNOWLEDGE_BACKEND for this build",
     )
-    parser.add_argument("--chunk-size", type=int, default=800)
-    parser.add_argument("--chunk-overlap", type=int, default=120)
-    args = parser.parse_args()
+    parser.add_argument("--chunk-size", type=int, default=None)
+    parser.add_argument("--chunk-overlap", type=int, default=None)
+    return parser
 
-    config = Configuration.from_env(
+
+def configuration_from_args(args: argparse.Namespace) -> Configuration:
+    """Apply only explicit CLI flags over environment configuration."""
+
+    return Configuration.from_env(
         overrides={
             "knowledge_backend": args.backend,
-            "knowledge_base_path": str(args.knowledge_base),
-            "knowledge_index_path": str(args.index_dir),
+            "knowledge_base_path": (
+                str(args.knowledge_base) if args.knowledge_base is not None else None
+            ),
+            "knowledge_index_path": (
+                str(args.index_dir) if args.index_dir is not None else None
+            ),
             "knowledge_chunk_size": args.chunk_size,
             "knowledge_chunk_overlap": args.chunk_overlap,
         }
     )
+
+
+def main(argv: list[str] | None = None) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    args = _build_parser().parse_args(argv)
+    config = configuration_from_args(args)
     service = KnowledgeService(config)
     result = service.rebuild()
     print(f"Knowledge backend rebuilt: {result.backend}")

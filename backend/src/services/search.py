@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from hello_agents.tools import SearchTool
 
 from config import Configuration
+from services.log_redaction import redact_sensitive_text
 from services.user_messages import WEB_PROVIDER_NOTICE
 from utils import (
     CHARS_PER_TOKEN,
@@ -55,7 +56,11 @@ def dispatch_search(
             }
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Search backend %s failed: %s", search_api, exc)
+        logger.error(
+            "Search backend %s failed: %s",
+            search_api,
+            redact_sensitive_text(exc),
+        )
         raise
 
     payload, response_issue = normalize_search_response(raw_response, search_api)

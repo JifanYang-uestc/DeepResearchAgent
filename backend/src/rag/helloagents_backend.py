@@ -9,6 +9,7 @@ from typing import Protocol
 import numpy as np
 
 from config import Configuration
+from services.log_redaction import redact_sensitive_text
 
 from .base import KnowledgeBuildResult, KnowledgeDocumentInfo
 from .catalog import build_knowledge_catalog
@@ -101,7 +102,10 @@ class HelloAgentsSemanticBackend:
         try:
             self._get_retriever()
         except Exception as exc:  # noqa: BLE001 - health boundary
-            logger.warning("HelloAgents semantic backend health check failed: %s", exc)
+            logger.warning(
+                "HelloAgents semantic backend health check failed: %s",
+                redact_sensitive_text(exc),
+            )
             return False
         return True
 

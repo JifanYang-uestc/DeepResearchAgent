@@ -9,6 +9,7 @@ from rag.base import KnowledgeBackend, KnowledgeBuildResult, KnowledgeDocumentIn
 from rag.helloagents_backend import HelloAgentsSemanticBackend
 from rag.legacy_faiss_backend import LegacyFaissBackend
 from rag.types import RetrievalResult
+from services.log_redaction import redact_sensitive_text
 from services.user_messages import (
     CATALOG_FALLBACK,
     CATALOG_UNAVAILABLE,
@@ -34,7 +35,7 @@ class KnowledgeService:
             self._fallback_backend = fallback_backend
         elif config.knowledge_backend == "helloagents":
             self._backend = HelloAgentsSemanticBackend(config)
-            self._fallback_backend = fallback_backend or LegacyFaissBackend(config)
+            self._fallback_backend = fallback_backend
         elif config.knowledge_backend == "legacy_faiss":
             self._backend = LegacyFaissBackend(config)
             self._fallback_backend = fallback_backend
@@ -63,10 +64,11 @@ class KnowledgeService:
         limit = top_k or self._config.knowledge_top_k
         try:
             return self._backend.retrieve(query, limit), [], self._backend.name
-        except Exception:  # noqa: BLE001 - degradation boundary
-            logger.exception(
-                "Knowledge backend %s unavailable; degrading to another route",
+        except Exception as exc:  # noqa: BLE001 - degradation boundary
+            logger.error(
+                "Knowledge backend %s unavailable: %s",
                 self._backend.name,
+                redact_sensitive_text(exc),
             )
             if self._fallback_backend is not None:
                 try:
@@ -74,10 +76,11 @@ class KnowledgeService:
                         query, limit
                     )
                     return results, [KNOWLEDGE_FALLBACK], self._fallback_backend.name
-                except Exception:  # noqa: BLE001 - fallback boundary
-                    logger.exception(
-                        "Fallback knowledge backend %s unavailable",
+                except Exception as exc:  # noqa: BLE001 - fallback boundary
+                    logger.error(
+                        "Fallback knowledge backend %s unavailable: %s",
                         self._fallback_backend.name,
+                        redact_sensitive_text(exc),
                     )
             return [], [KNOWLEDGE_UNAVAILABLE], "none"
 
@@ -88,14 +91,20 @@ class KnowledgeService:
             return [], ["Knowledge RAG 已禁用，Knowledge Catalog 不可用。"]
         try:
             return self._backend.get_catalog(), []
-        except Exception:  # noqa: BLE001 - degradation boundary
-            logger.exception("Knowledge catalog unavailable")
+        except Exception as exc:  # noqa: BLE001 - degradation boundary
+            logger.error(
+                "Knowledge catalog unavailable: %s",
+                redact_sensitive_text(exc),
+            )
             if self._fallback_backend is not None:
                 try:
                     catalog = self._fallback_backend.get_catalog()
                     return catalog, [CATALOG_FALLBACK]
-                except Exception:  # noqa: BLE001
-                    logger.exception("Fallback knowledge catalog unavailable")
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Fallback knowledge catalog unavailable: %s",
+                        redact_sensitive_text(exc),
+                    )
             return [], [CATALOG_UNAVAILABLE]
 
     def prepare(self) -> tuple[bool, list[str]]:

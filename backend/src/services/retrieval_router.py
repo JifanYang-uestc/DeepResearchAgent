@@ -16,6 +16,7 @@ from typing import Protocol
 from config import Configuration
 from models import TodoItem
 from rag.base import KnowledgeDocumentInfo
+from services.log_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,10 @@ class RetrievalRouter:
             decision = _parse_decision(raw, task, signals)
             return _enforce_hard_boundaries(decision, fallback, signals)
         except Exception as exc:  # noqa: BLE001 - deterministic fallback boundary
-            logger.warning("Retrieval router failed; using deterministic fallback: %s", exc)
+            logger.warning(
+                "Retrieval router failed; using deterministic fallback: %s",
+                redact_sensitive_text(exc),
+            )
             return RoutingDecision(
                 route=fallback.route,
                 reason=f"Router 不可用，使用确定性回退：{fallback.reason}",
@@ -199,6 +203,9 @@ def _collect_signals(
         "market",
         "funding",
         "news",
+        "新应用",
+        "截至",
+        "今年",
     )
     local_terms = (
         "根据本地文档",
@@ -217,7 +224,8 @@ def _collect_signals(
         _normalize(entry.document) in task_text for entry in catalog
     )
     return RoutingSignals(
-        task_freshness_required=any(term in task_text for term in freshness_terms),
+        task_freshness_required=any(term in task_text for term in freshness_terms)
+        or bool(re.search(r"(?<!\d)(?:19|20)\d{2}(?!\d)", task_text)),
         global_freshness_context=any(term in global_text for term in freshness_terms),
         explicit_local_request=explicit_filename
         or any(term in task_text for term in local_terms),
@@ -383,8 +391,6 @@ def _enforce_hard_boundaries(
     if signals.task_freshness_required and (
         signals.matched_documents or signals.explicit_local_request
     ):
-        return fallback
-    if signals.matched_documents and not signals.task_freshness_required:
         return fallback
     return decision
 

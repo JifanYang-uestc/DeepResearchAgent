@@ -274,3 +274,34 @@ def test_generic_only_catalog_title_is_not_a_domain_match() -> None:
 
     assert decision.route is RetrievalRoute.WEB
     assert decision.knowledge_query is None
+
+
+def test_catalog_match_does_not_override_structured_web_decision() -> None:
+    class WebProvider:
+        def run(self, prompt: str) -> str:
+            return (
+                '{"route":"web","reason":"application update needs web",'
+                '"confidence":0.9,"knowledge_query":null,'
+                '"web_query":"ReAct applications"}'
+            )
+
+    decision = RetrievalRouter(Configuration(), WebProvider()).route(
+        research_topic="ReAct applications",
+        task=_task("ReAct applications"),
+        knowledge_catalog=CATALOG,
+    )
+
+    assert decision.route is RetrievalRoute.WEB
+
+
+def test_year_and_new_application_route_keeps_web_available() -> None:
+    query = "ReAct 在 2026 年有哪些新应用？"
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=query,
+        task=_task(query),
+        knowledge_catalog=CATALOG,
+    )
+
+    assert decision.route is RetrievalRoute.HYBRID
+    assert decision.web_query == query

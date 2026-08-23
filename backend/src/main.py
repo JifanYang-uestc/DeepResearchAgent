@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -17,6 +17,7 @@ load_dotenv()
 
 from agent import DeepResearchAgent
 from config import Configuration, SearchAPI
+from services.log_redaction import redact_sensitive_text
 from services.user_messages import (
     INVALID_RESEARCH_REQUEST,
     RESEARCH_FAILED,
@@ -63,17 +64,6 @@ class ResearchResponse(BaseModel):
     )
 
 
-def _mask_secret(value: Optional[str], visible: int = 4) -> str:
-    """Mask sensitive tokens while keeping leading and trailing characters."""
-    if not value:
-        return "unset"
-
-    if len(value) <= visible * 2:
-        return "*" * len(value)
-
-    return f"{value[:visible]}...{value[-visible:]}"
-
-
 def _build_config(payload: ResearchRequest) -> Configuration:
     overrides: Dict[str, Any] = {}
 
@@ -84,11 +74,12 @@ def _build_config(payload: ResearchRequest) -> Configuration:
 
 
 def create_app() -> FastAPI:
+    initial_config = Configuration.from_env()
     app = FastAPI(title="HelloAgents Deep Researcher")
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=initial_config.resolved_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -110,13 +101,13 @@ def create_app() -> FastAPI:
             "max_loops={} fetch_full_page={} tool_calling={} strip_thinking={} api_key={}",
             config.llm_provider,
             config.resolved_model() or "unset",
-            base_url,
+            redact_sensitive_text(base_url),
             (config.search_api.value if isinstance(config.search_api, SearchAPI) else config.search_api),
             config.max_web_research_loops,
             config.fetch_full_page,
             config.use_tool_calling,
             config.strip_thinking_tokens,
-            _mask_secret(config.llm_api_key),
+            "configured" if config.llm_api_key else "unset",
         )
 
     @app.get("/healthz")
@@ -130,13 +121,16 @@ def create_app() -> FastAPI:
             agent = DeepResearchAgent(config=config)
             result = agent.run(payload.topic)
         except ValueError as exc:  # Likely due to unsupported configuration
-            logger.exception("Invalid synchronous research request")
+            logger.error(
+                "Invalid synchronous research request: {}",
+                redact_sensitive_text(exc),
+            )
             raise HTTPException(
                 status_code=400,
                 detail=INVALID_RESEARCH_REQUEST,
             ) from exc
         except Exception as exc:  # pragma: no cover - defensive guardrail
-            logger.exception("Synchronous research failed")
+            logger.error("Synchronous research failed: {}", redact_sensitive_text(exc))
             raise HTTPException(status_code=500, detail=RESEARCH_FAILED) from exc
 
         todo_payload = [
@@ -171,7 +165,10 @@ def create_app() -> FastAPI:
             config = _build_config(payload)
             agent = DeepResearchAgent(config=config)
         except ValueError as exc:
-            logger.exception("Invalid streaming research request")
+            logger.error(
+                "Invalid streaming research request: {}",
+                redact_sensitive_text(exc),
+            )
             raise HTTPException(
                 status_code=400,
                 detail=INVALID_RESEARCH_REQUEST,
@@ -181,8 +178,11 @@ def create_app() -> FastAPI:
             try:
                 for event in agent.run_stream(payload.topic):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except Exception:  # pragma: no cover - defensive guardrail
-                logger.exception("Streaming research failed")
+            except Exception as exc:  # pragma: no cover - defensive guardrail
+                logger.error(
+                    "Streaming research failed: {}",
+                    redact_sensitive_text(exc),
+                )
                 error_payload = {
                     "type": "error",
                     "detail": STREAMING_RESEARCH_FAILED,

@@ -167,6 +167,11 @@ class Configuration(BaseModel):
         title="LLM Model ID",
         description="Optional model identifier for custom OpenAI-compatible services",
     )
+    cors_origins: str = Field(
+        default="http://localhost:5173",
+        title="CORS Origins",
+        description="Comma-separated browser origins allowed to call the API",
+    )
 
     @classmethod
     def from_env(cls, overrides: Optional[dict[str, Any]] = None) -> "Configuration":
@@ -211,6 +216,7 @@ class Configuration(BaseModel):
             "knowledge_chunk_size": os.getenv("KNOWLEDGE_CHUNK_SIZE"),
             "knowledge_chunk_overlap": os.getenv("KNOWLEDGE_CHUNK_OVERLAP"),
             "knowledge_auto_build": os.getenv("KNOWLEDGE_AUTO_BUILD"),
+            "cors_origins": os.getenv("CORS_ORIGINS"),
         }
 
         for key, value in env_aliases.items():
@@ -236,4 +242,13 @@ class Configuration(BaseModel):
         """Best-effort resolution of the model identifier to use."""
 
         return self.llm_model_id or self.local_llm
+
+    def resolved_cors_origins(self) -> list[str]:
+        """Return normalized configured CORS origins."""
+
+        return [
+            origin.strip()
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ] or ["http://localhost:5173"]
 

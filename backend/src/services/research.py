@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal
 from config import Configuration
 from rag.types import RetrievalResult
 from services.knowledge import KnowledgeService
+from services.log_redaction import redact_sensitive_text
 from services.relevance_gate import KnowledgeGateResult, KnowledgeRelevanceGate
 from services.retrieval_router import RetrievalRoute, RoutingDecision
 from services.search import (
@@ -169,8 +170,11 @@ def gather_research_evidence(
                     config,
                 )
                 structured_web = _web_sources(web_result)
-        except Exception:  # noqa: BLE001 - degradation boundary
-            logger.exception("Web Search failed during evidence collection")
+        except Exception as exc:  # noqa: BLE001 - degradation boundary
+            logger.error(
+                "Web Search failed during evidence collection: %s",
+                redact_sensitive_text(exc),
+            )
             notices.append(WEB_UNAVAILABLE)
         finally:
             web_latency_ms = (perf_counter() - web_started) * 1000

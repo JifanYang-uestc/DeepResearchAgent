@@ -22,10 +22,11 @@ from prompts import (
     todo_planner_system_prompt,
 )
 from services.knowledge import KnowledgeService
+from services.log_redaction import redact_sensitive_text
 from services.planner import PlanningService
 from services.relevance_gate import KnowledgeRelevanceGate
 from services.reporter import ReportingService
-from services.research import gather_research_evidence
+from services.research import EvidenceBundle, gather_research_evidence
 from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
@@ -152,7 +153,7 @@ class DeepResearchAgent:
             state.todo_items = [self.planner.create_fallback_task(state)]
 
         for task in state.todo_items:
-            self._execute_task(state, task, emit_stream=False)
+            self._execute_task_sync(state, task)
 
         report = self.reporting.generate_report(state)
         self._drain_tool_events(state)
@@ -237,7 +238,12 @@ class DeepResearchAgent:
                 for event in self._execute_task(state, task, emit_stream=True, step=step):
                     enqueue(event, task=task)
             except Exception as exc:  # pragma: no cover - defensive guardrail
-                logger.exception("Task execution failed", exc_info=exc)
+                task.status = "failed"
+                task.summary = TASK_EXECUTION_FAILED
+                logger.error(
+                    "Task execution failed: %s",
+                    redact_sensitive_text(exc),
+                )
                 enqueue(
                     {
                         "type": "task_status",
@@ -305,18 +311,38 @@ class DeepResearchAgent:
     # ------------------------------------------------------------------
     # Execution helpers
     # ------------------------------------------------------------------
-    def _execute_task(
+    def _execute_task_sync(self, state: SummaryState, task: TodoItem) -> None:
+        """Execute one TODO directly without relying on generator consumption."""
+
+        task_started = perf_counter()
+        evidence, _ = self._collect_task_evidence(state, task)
+        self._drain_tool_events(state)
+
+        if not evidence.available:
+            task.status = "skipped"
+            task.summary = "当前可用来源未提供足够证据。"
+            task.retrieval_metrics_ms["total_task"] = (
+                perf_counter() - task_started
+            ) * 1000
+            return
+
+        self._record_evidence(state, task, evidence)
+        summary_text = self.summarizer.summarize_task(state, task, evidence.context)
+        self._drain_tool_events(state)
+        task.summary = summary_text.strip() if summary_text else "暂无可用信息"
+        task.status = "completed"
+        task.retrieval_metrics_ms["total_task"] = (
+            perf_counter() - task_started
+        ) * 1000
+
+    def _collect_task_evidence(
         self,
         state: SummaryState,
         task: TodoItem,
-        *,
-        emit_stream: bool,
-        step: int | None = None,
-    ) -> Iterator[dict[str, Any]]:
-        """Run search + summarization for a single task."""
-        task_started = perf_counter()
-        task.status = "in_progress"
+    ) -> tuple[EvidenceBundle, float]:
+        """Run routing and retrieval as a direct shared side-effecting operation."""
 
+        task.status = "in_progress"
         catalog, catalog_notices = self.knowledge.get_catalog()
         router_started = perf_counter()
         decision = self.router.route(
@@ -329,18 +355,6 @@ class DeepResearchAgent:
         task.retrieval_reason = decision.reason
         task.retrieval_confidence = decision.confidence
         task.freshness_required = decision.freshness_required
-
-        if emit_stream:
-            yield {
-                "type": "retrieval_route",
-                "task_id": task.id,
-                "route": decision.route.value,
-                "reason": decision.reason,
-                "confidence": decision.confidence,
-                "freshness_required": decision.freshness_required,
-                "router_latency_ms": router_latency_ms,
-                "step": step,
-            }
 
         evidence = gather_research_evidence(
             task.query,
@@ -357,6 +371,46 @@ class DeepResearchAgent:
         }
         self._last_search_notices = evidence.notices
         task.notices = evidence.notices
+        return evidence, router_latency_ms
+
+    def _record_evidence(
+        self,
+        state: SummaryState,
+        task: TodoItem,
+        evidence: EvidenceBundle,
+    ) -> None:
+        """Attach admitted evidence to task and aggregate state once."""
+
+        task.sources_summary = evidence.sources_summary
+        task.source_items = [source.to_dict() for source in evidence.sources]
+        with self._state_lock:
+            state.web_research_results.append(evidence.context)
+            state.sources_gathered.append(evidence.sources_summary)
+            state.research_loop_count += 1
+
+    def _execute_task(
+        self,
+        state: SummaryState,
+        task: TodoItem,
+        *,
+        emit_stream: bool,
+        step: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Run search + summarization for a single task."""
+        task_started = perf_counter()
+        evidence, router_latency_ms = self._collect_task_evidence(state, task)
+
+        if emit_stream:
+            yield {
+                "type": "retrieval_route",
+                "task_id": task.id,
+                "route": task.retrieval_route,
+                "reason": task.retrieval_reason,
+                "confidence": task.retrieval_confidence,
+                "freshness_required": task.freshness_required,
+                "router_latency_ms": router_latency_ms,
+                "step": step,
+            }
 
         if emit_stream:
             for event in self._drain_tool_events(state, step=step):
@@ -387,6 +441,7 @@ class DeepResearchAgent:
 
         if not evidence.available:
             task.status = "skipped"
+            task.summary = "当前可用来源未提供足够证据。"
             task.retrieval_metrics_ms["total_task"] = (
                 perf_counter() - task_started
             ) * 1000
@@ -410,16 +465,9 @@ class DeepResearchAgent:
             if not emit_stream:
                 self._drain_tool_events(state)
 
+        self._record_evidence(state, task, evidence)
         sources_summary = evidence.sources_summary
         context = evidence.context
-
-        task.sources_summary = sources_summary
-        task.source_items = [source.to_dict() for source in evidence.sources]
-
-        with self._state_lock:
-            state.web_research_results.append(context)
-            state.sources_gathered.append(sources_summary)
-            state.research_loop_count += 1
 
         summary_text: str | None = None
 

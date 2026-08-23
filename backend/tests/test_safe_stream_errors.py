@@ -15,8 +15,11 @@ SENSITIVE_ERROR = r"secret-token=abc123 path=C:\Users\test\model"
 
 
 class OneTaskPlanner:
+    def __init__(self) -> None:
+        self.task = TodoItem(id=1, title="test", intent="test", query="test")
+
     def plan_todo_list(self, state):
-        return [TodoItem(id=1, title="test", intent="test", query="test")]
+        return [self.task]
 
 
 class SafeReporting:
@@ -42,7 +45,8 @@ def test_task_failure_sse_does_not_leak_raw_exception(caplog) -> None:
 
     agent = DeepResearchAgent.__new__(DeepResearchAgent)
     agent.config = Configuration(enable_notes=False)
-    agent.planner = OneTaskPlanner()
+    planner = OneTaskPlanner()
+    agent.planner = planner
     agent.reporting = SafeReporting()
     agent.note_tool = None
     agent._tool_tracker = FakeTracker()
@@ -59,7 +63,9 @@ def test_task_failure_sse_does_not_leak_raw_exception(caplog) -> None:
 
     assert "abc123" not in failed["detail"]
     assert r"C:\Users\test\model" not in failed["detail"]
-    assert SENSITIVE_ERROR in caplog.text
+    assert planner.task.status == "failed"
+    assert "abc123" not in caplog.text
+    assert "[REDACTED]" in caplog.text
 
 
 def test_outer_stream_error_does_not_leak_raw_exception(monkeypatch) -> None:

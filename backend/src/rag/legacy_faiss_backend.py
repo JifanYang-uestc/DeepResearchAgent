@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock
 
 from config import Configuration
+from services.log_redaction import redact_sensitive_text
 
 from .base import KnowledgeBuildResult, KnowledgeDocumentInfo
 from .catalog import build_knowledge_catalog
@@ -42,7 +43,10 @@ class LegacyFaissBackend:
         try:
             self._get_retriever()
         except Exception as exc:  # noqa: BLE001 - health boundary
-            logger.warning("Legacy FAISS health check failed: %s", exc)
+            logger.warning(
+                "Legacy FAISS health check failed: %s",
+                redact_sensitive_text(exc),
+            )
             return False
         return True
 
