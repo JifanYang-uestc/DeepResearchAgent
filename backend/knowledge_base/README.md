@@ -26,7 +26,10 @@
 
 可选：Toolformer，保存为 `toolformer.pdf`。
 
-## 恢复索引
+## 重建索引
+
+以下命令会根据当前 Knowledge Base **完整替换**所选 Backend 的 Runtime Index。
+添加、修改或删除文件后必须重新执行；它不会只加载旧索引或只做健康检查。
 
 在 `backend` 目录运行：
 
@@ -39,3 +42,8 @@
 ```powershell
 .\.venv\Scripts\python.exe scripts\debug_retrieval.py --top-k 1
 ```
+
+`debug_retrieval.py` 默认使用独立测试索引
+`backend/vector_store/debug-legacy/`，不会修改 Semantic Runtime Index
+`helloagents-semantic/`，也不会覆盖 Legacy Runtime Index。只有显式传入
+`--index-dir` 时才会使用其它位置。

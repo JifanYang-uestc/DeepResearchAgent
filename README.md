@@ -118,9 +118,23 @@ $env:PYTHONUTF8='1'
 .\.venv\Scripts\python.exe scripts\debug_semantic_retrieval.py
 ```
 
+`build_knowledge_index.py` 是显式重建命令，不是健康检查：每次执行都会从当前
+`knowledge_base/` 重新加载文件、分块、生成 Embedding、替换 FAISS 与 metadata，
+并刷新当前 Backend 的缓存 Retriever。添加、替换或删除 Knowledge 文件后必须再次
+执行该命令。输出包含 Backend、Documents、Pages、Chunks 和最终 Index 路径。
+
 调试输出会显示 Backend、Gate 决策、Accept/Reject、Score、Document、Page、
 Chunk ID 和 Content。Semantic 索引位于
 `backend/vector_store/helloagents-semantic/`，重启后直接加载。
+
+Windows 上如果 Transformers/PyTorch 在加载本地模型时出现原生线程访问冲突，可在
+测试或构建前临时使用顺序权重加载：
+
+```powershell
+$env:HF_DEACTIVATE_ASYNC_LOAD='1'
+$env:OMP_NUM_THREADS='1'
+$env:MKL_NUM_THREADS='1'
+```
 
 ## 三类路由
 
@@ -218,6 +232,8 @@ HelloAgents 0.2.9 RAG API、Qdrant 版本、结构化返回和 metadata 调查�
 [V0.3 Compatibility Spike](docs/v0.3-rag-compatibility.md)。
 完整开发结果、回归、验收与已知限制见
 [V0.3 Development Summary](V0.3_DEVELOPMENT_SUMMARY.md)。
+审查问题的修复结果见
+[V0.3 Review Fix Summary](V0.3_REVIEW_FIX_SUMMARY.md)。
 
 V0.3 到此停止，不包含 BM25、RRF、Reranker、Reflection Agent、自动研究循环、
 RAGAS/DeepEval、前端文件上传、认证或数据库。
