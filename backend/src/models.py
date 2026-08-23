@@ -24,6 +24,7 @@ class TodoItem:
     retrieval_reason: Optional[str] = field(default=None)
     retrieval_confidence: Optional[float] = field(default=None)
     freshness_required: bool = field(default=False)
+    retrieval_metrics_ms: dict[str, float | None] = field(default_factory=dict)
     note_id: Optional[str] = field(default=None)
     note_path: Optional[str] = field(default=None)
     stream_token: Optional[str] = field(default=None)

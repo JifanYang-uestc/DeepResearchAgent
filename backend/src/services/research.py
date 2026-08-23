@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any, Callable, Literal
 
 from config import Configuration
@@ -59,6 +60,7 @@ class EvidenceBundle:
     sources: list[EvidenceSource] = field(default_factory=list)
     routing_decision: RoutingDecision | None = None
     gate_result: KnowledgeGateResult | None = None
+    timings_ms: dict[str, float | None] = field(default_factory=dict)
 
     @property
     def available(self) -> bool:
@@ -79,6 +81,7 @@ def gather_research_evidence(
 ) -> EvidenceBundle:
     """Execute the selected routes and admit only relevant knowledge evidence."""
 
+    retrieval_started = perf_counter()
     decision = decision or RoutingDecision(
         route=RetrievalRoute.HYBRID,
         reason="Compatibility default: execute both V0.2 evidence routes.",
@@ -92,6 +95,8 @@ def gather_research_evidence(
     knowledge_results: list[RetrievalResult] = []
     gate_result: KnowledgeGateResult | None = None
     knowledge_backend = "none"
+    knowledge_latency_ms: float | None = None
+    web_latency_ms: float | None = None
 
     run_knowledge = decision.route in (
         RetrievalRoute.KNOWLEDGE,
@@ -100,6 +105,7 @@ def gather_research_evidence(
     run_web = decision.route in (RetrievalRoute.WEB, RetrievalRoute.HYBRID)
 
     if run_knowledge:
+        knowledge_started = perf_counter()
         knowledge_query = decision.knowledge_query or query
         knowledge_results, knowledge_notices, knowledge_backend = _retrieve_candidates(
             knowledge,
@@ -120,6 +126,7 @@ def gather_research_evidence(
             notices.append(
                 "Knowledge 路由未获得有效 Evidence，已回退到 Web Search。"
             )
+        knowledge_latency_ms = (perf_counter() - knowledge_started) * 1000
 
     knowledge_sources, knowledge_context, structured_knowledge = _format_knowledge(
         knowledge_results
@@ -131,6 +138,7 @@ def gather_research_evidence(
     web_backend = "web"
     structured_web: list[EvidenceSource] = []
     if run_web:
+        web_started = perf_counter()
         try:
             web_result, web_notices, answer_text, web_backend = web_search(
                 decision.web_query or query,
@@ -147,6 +155,8 @@ def gather_research_evidence(
                 structured_web = _web_sources(web_result)
         except Exception as exc:  # noqa: BLE001 - degradation boundary
             notices.append(f"Web Search 不可用，继续使用本地 Knowledge Evidence：{exc}")
+        finally:
+            web_latency_ms = (perf_counter() - web_started) * 1000
 
     contexts = [part for part in (knowledge_context, web_context) if part]
     sources = [part for part in (knowledge_sources, web_sources) if part]
@@ -166,6 +176,11 @@ def gather_research_evidence(
         sources=[*structured_knowledge, *structured_web],
         routing_decision=decision,
         gate_result=gate_result,
+        timings_ms={
+            "knowledge_retrieval": knowledge_latency_ms,
+            "web_search": web_latency_ms,
+            "total_retrieval": (perf_counter() - retrieval_started) * 1000,
+        },
     )
 
 

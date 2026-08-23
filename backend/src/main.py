@@ -141,6 +141,11 @@ def create_app() -> FastAPI:
                 "sources": item.source_items,
                 "note_id": item.note_id,
                 "note_path": item.note_path,
+                "retrieval_route": item.retrieval_route,
+                "retrieval_reason": item.retrieval_reason,
+                "retrieval_confidence": item.retrieval_confidence,
+                "freshness_required": item.freshness_required,
+                "retrieval_metrics_ms": item.retrieval_metrics_ms,
             }
             for item in result.todo_items
         ]
