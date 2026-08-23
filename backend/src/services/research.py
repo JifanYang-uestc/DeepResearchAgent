@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Callable, Literal
@@ -12,6 +13,9 @@ from services.knowledge import KnowledgeService
 from services.relevance_gate import KnowledgeGateResult, KnowledgeRelevanceGate
 from services.retrieval_router import RetrievalRoute, RoutingDecision
 from services.search import dispatch_search, prepare_research_context
+from services.user_messages import WEB_UNAVAILABLE
+
+logger = logging.getLogger(__name__)
 
 WebSearch = Callable[
     [str, Configuration, int],
@@ -153,8 +157,9 @@ def gather_research_evidence(
                     config,
                 )
                 structured_web = _web_sources(web_result)
-        except Exception as exc:  # noqa: BLE001 - degradation boundary
-            notices.append(f"Web Search 不可用，继续使用本地 Knowledge Evidence：{exc}")
+        except Exception:  # noqa: BLE001 - degradation boundary
+            logger.exception("Web Search failed during evidence collection")
+            notices.append(WEB_UNAVAILABLE)
         finally:
             web_latency_ms = (perf_counter() - web_started) * 1000
 

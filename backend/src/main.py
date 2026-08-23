@@ -17,6 +17,11 @@ load_dotenv()
 
 from agent import DeepResearchAgent
 from config import Configuration, SearchAPI
+from services.user_messages import (
+    INVALID_RESEARCH_REQUEST,
+    RESEARCH_FAILED,
+    STREAMING_RESEARCH_FAILED,
+)
 
 # 添加控制台日志处理程序
 logger.add(
@@ -125,9 +130,14 @@ def create_app() -> FastAPI:
             agent = DeepResearchAgent(config=config)
             result = agent.run(payload.topic)
         except ValueError as exc:  # Likely due to unsupported configuration
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            logger.exception("Invalid synchronous research request")
+            raise HTTPException(
+                status_code=400,
+                detail=INVALID_RESEARCH_REQUEST,
+            ) from exc
         except Exception as exc:  # pragma: no cover - defensive guardrail
-            raise HTTPException(status_code=500, detail="Research failed") from exc
+            logger.exception("Synchronous research failed")
+            raise HTTPException(status_code=500, detail=RESEARCH_FAILED) from exc
 
         todo_payload = [
             {
@@ -161,15 +171,22 @@ def create_app() -> FastAPI:
             config = _build_config(payload)
             agent = DeepResearchAgent(config=config)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            logger.exception("Invalid streaming research request")
+            raise HTTPException(
+                status_code=400,
+                detail=INVALID_RESEARCH_REQUEST,
+            ) from exc
 
         def event_iterator() -> Iterator[str]:
             try:
                 for event in agent.run_stream(payload.topic):
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except Exception as exc:  # pragma: no cover - defensive guardrail
+            except Exception:  # pragma: no cover - defensive guardrail
                 logger.exception("Streaming research failed")
-                error_payload = {"type": "error", "detail": str(exc)}
+                error_payload = {
+                    "type": "error",
+                    "detail": STREAMING_RESEARCH_FAILED,
+                }
                 yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(

@@ -102,7 +102,8 @@ def test_semantic_embedding_failure_falls_back_to_legacy() -> None:
 
     assert results
     assert backend == "legacy_faiss"
-    assert "semantic embedding failure" in notices[0]
+    assert "本地回退后端" in notices[0]
+    assert "semantic embedding failure" not in notices[0]
 
 
 def test_vector_backend_unavailable_falls_back_to_legacy() -> None:
@@ -116,4 +117,23 @@ def test_vector_backend_unavailable_falls_back_to_legacy() -> None:
 
     assert results
     assert backend == "legacy_faiss"
-    assert "vector backend unavailable" in notices[0]
+    assert "本地回退后端" in notices[0]
+    assert "vector backend unavailable" not in notices[0]
+
+
+def test_user_visible_notice_does_not_leak_raw_exception() -> None:
+    sensitive = r"secret-token=abc123 path=C:\Users\test\model"
+    service = KnowledgeService(
+        Configuration(),
+        backend=FailingBackend(sensitive),
+        fallback_backend=FailingBackend(sensitive),
+    )
+
+    results, notices, backend = service.retrieve_with_backend("query")
+
+    assert results == []
+    assert backend == "none"
+    assert notices
+    assert "abc123" not in notices[0]
+    assert r"C:\Users\test\model" not in notices[0]
+    assert sensitive not in notices[0]

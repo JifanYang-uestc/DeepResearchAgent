@@ -9,6 +9,7 @@ from typing import Any, Optional, Tuple
 from hello_agents.tools import SearchTool
 
 from config import Configuration
+from services.user_messages import WEB_PROVIDER_NOTICE
 from utils import (
     deduplicate_and_format_sources,
     format_sources,
@@ -53,8 +54,8 @@ def dispatch_search(
         raise
 
     if isinstance(raw_response, str):
-        notices = [raw_response]
         logger.warning("Search backend %s returned text notice: %s", search_api, raw_response)
+        notices = [WEB_PROVIDER_NOTICE]
         payload: dict[str, Any] = {
             "results": [],
             "backend": search_api,
@@ -63,7 +64,10 @@ def dispatch_search(
         }
     else:
         payload = raw_response
-        notices = list(payload.get("notices") or [])
+        provider_notices = list(payload.get("notices") or [])
+        for notice in provider_notices:
+            logger.warning("Search backend %s notice: %s", search_api, notice)
+        notices = [WEB_PROVIDER_NOTICE] if provider_notices else []
 
     backend_label = str(payload.get("backend") or search_api)
     answer_text = payload.get("answer")

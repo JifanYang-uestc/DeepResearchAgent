@@ -29,6 +29,7 @@ from services.research import gather_research_evidence
 from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
+from services.user_messages import TASK_EXECUTION_FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +243,7 @@ class DeepResearchAgent:
                         "type": "task_status",
                         "task_id": task.id,
                         "status": "failed",
-                        "detail": str(exc),
+                        "detail": TASK_EXECUTION_FAILED,
                         "title": task.title,
                         "intent": task.intent,
                         "note_id": task.note_id,

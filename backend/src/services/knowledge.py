@@ -9,6 +9,12 @@ from rag.base import KnowledgeBackend, KnowledgeBuildResult, KnowledgeDocumentIn
 from rag.helloagents_backend import HelloAgentsSemanticBackend
 from rag.legacy_faiss_backend import LegacyFaissBackend
 from rag.types import RetrievalResult
+from services.user_messages import (
+    CATALOG_FALLBACK,
+    CATALOG_UNAVAILABLE,
+    KNOWLEDGE_FALLBACK,
+    KNOWLEDGE_UNAVAILABLE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,29 +63,23 @@ class KnowledgeService:
         limit = top_k or self._config.knowledge_top_k
         try:
             return self._backend.retrieve(query, limit), [], self._backend.name
-        except Exception as exc:  # noqa: BLE001 - degradation boundary
-            logger.warning(
-                "Knowledge backend %s unavailable; degrading to web search: %s",
+        except Exception:  # noqa: BLE001 - degradation boundary
+            logger.exception(
+                "Knowledge backend %s unavailable; degrading to another route",
                 self._backend.name,
-                exc,
             )
             if self._fallback_backend is not None:
                 try:
                     results = self._fallback_backend.retrieve(
                         query, limit
                     )
-                    notice = (
-                        f"Knowledge Backend {self._backend.name} 不可用，"
-                        f"已回退到 {self._fallback_backend.name}：{exc}"
-                    )
-                    return results, [notice], self._fallback_backend.name
-                except Exception as fallback_exc:  # noqa: BLE001 - fallback boundary
-                    logger.warning(
-                        "Fallback knowledge backend %s unavailable: %s",
+                    return results, [KNOWLEDGE_FALLBACK], self._fallback_backend.name
+                except Exception:  # noqa: BLE001 - fallback boundary
+                    logger.exception(
+                        "Fallback knowledge backend %s unavailable",
                         self._fallback_backend.name,
-                        fallback_exc,
                     )
-            return [], [f"Knowledge RAG 不可用，已退化到 Web Search：{exc}"], "none"
+            return [], [KNOWLEDGE_UNAVAILABLE], "none"
 
     def get_catalog(self) -> tuple[list[KnowledgeDocumentInfo], list[str]]:
         """Return catalog metadata without exposing backend details upstream."""
@@ -88,17 +88,15 @@ class KnowledgeService:
             return [], ["Knowledge RAG 已禁用，Knowledge Catalog 不可用。"]
         try:
             return self._backend.get_catalog(), []
-        except Exception as exc:  # noqa: BLE001 - degradation boundary
-            logger.warning("Knowledge catalog unavailable: %s", exc)
+        except Exception:  # noqa: BLE001 - degradation boundary
+            logger.exception("Knowledge catalog unavailable")
             if self._fallback_backend is not None:
                 try:
                     catalog = self._fallback_backend.get_catalog()
-                    return catalog, [
-                        f"Knowledge Catalog 已回退到 {self._fallback_backend.name}：{exc}"
-                    ]
-                except Exception as fallback_exc:  # noqa: BLE001
-                    logger.warning("Fallback knowledge catalog unavailable: %s", fallback_exc)
-            return [], [f"Knowledge Catalog 不可用：{exc}"]
+                    return catalog, [CATALOG_FALLBACK]
+                except Exception:  # noqa: BLE001
+                    logger.exception("Fallback knowledge catalog unavailable")
+            return [], [CATALOG_UNAVAILABLE]
 
     def prepare(self) -> tuple[bool, list[str]]:
         """Load or build the configured primary backend for setup commands."""

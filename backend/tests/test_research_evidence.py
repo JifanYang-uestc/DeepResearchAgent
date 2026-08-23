@@ -38,7 +38,7 @@ def _knowledge_result() -> RetrievalResult:
 
 def test_web_failure_keeps_local_evidence() -> None:
     def failed_web(*args: object) -> object:
-        raise RuntimeError("web offline")
+        raise RuntimeError(r"secret-token=abc123 path=C:\Users\test\model")
 
     bundle = gather_research_evidence(
         "query",
@@ -52,6 +52,8 @@ def test_web_failure_keeps_local_evidence() -> None:
     assert bundle.backend == "knowledge"
     assert "Local evidence remains available" in bundle.context
     assert "Web Search 不可用" in bundle.notices[0]
+    assert "abc123" not in bundle.notices[0]
+    assert r"C:\Users\test\model" not in bundle.notices[0]
 
 
 def test_knowledge_failure_keeps_web_evidence() -> None:
