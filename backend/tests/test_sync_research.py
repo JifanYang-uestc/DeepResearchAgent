@@ -122,7 +122,7 @@ def test_sync_run_executes_all_todos(monkeypatch) -> None:
 
 def test_post_research_executes_retrieval_and_summary(monkeypatch) -> None:
     agent, retrieval_calls = _build_agent(monkeypatch)
-    monkeypatch.setattr(main_module, "DeepResearchAgent", lambda config=None: agent)
+    monkeypatch.setattr(main_module, "DeepResearchAgent", lambda **kwargs: agent)
 
     with TestClient(main_module.create_app()) as client:
         response = client.post("/research", json={"topic": "sync endpoint"})

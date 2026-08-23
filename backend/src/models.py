@@ -33,6 +33,8 @@ class TodoItem:
 @dataclass(kw_only=True)
 class SummaryState:
     research_topic: str = field(default=None)  # Report topic
+    research_mode: str = field(default="web")
+    document_set_id: Optional[str] = field(default=None)
     search_query: str = field(default=None)  # Deprecated placeholder
     web_research_results: Annotated[list, operator.add] = field(default_factory=list)
     sources_gathered: Annotated[list, operator.add] = field(default_factory=list)

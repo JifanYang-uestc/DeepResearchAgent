@@ -7,7 +7,7 @@ import sys
 from typing import Any, Dict, Iterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -17,6 +17,16 @@ load_dotenv()
 
 from agent import DeepResearchAgent
 from config import Configuration, SearchAPI
+from research_mode import ResearchMode
+from services.document_sets import (
+    DocumentIndexingError,
+    DocumentSetNotFound,
+    DocumentSetNotReady,
+    DocumentSetService,
+    DocumentUpload,
+    DocumentValidationError,
+)
+from services.knowledge import KnowledgeService
 from services.log_redaction import redact_sensitive_text
 from services.user_messages import (
     INVALID_RESEARCH_REQUEST,
@@ -46,6 +56,14 @@ class ResearchRequest(BaseModel):
     """Payload for triggering a research run."""
 
     topic: str = Field(..., description="Research topic supplied by the user")
+    research_mode: ResearchMode = Field(
+        default=ResearchMode.WEB,
+        description="User-controlled source permission boundary",
+    )
+    document_set_id: str | None = Field(
+        default=None,
+        description="Ready uploaded-document scope required by document/hybrid modes",
+    )
     search_api: SearchAPI | None = Field(
         default=None,
         description="Override the default search backend configured via env",
@@ -58,6 +76,8 @@ class ResearchResponse(BaseModel):
     report_markdown: str = Field(
         ..., description="Markdown-formatted research report including sections"
     )
+    research_mode: ResearchMode
+    document_set_id: str | None = None
     todo_items: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Structured TODO items with summaries and sources",
@@ -73,9 +93,13 @@ def _build_config(payload: ResearchRequest) -> Configuration:
     return Configuration.from_env(overrides=overrides)
 
 
-def create_app() -> FastAPI:
+def create_app(
+    document_set_service: DocumentSetService | None = None,
+) -> FastAPI:
     initial_config = Configuration.from_env()
     app = FastAPI(title="HelloAgents Deep Researcher")
+    document_sets = document_set_service or DocumentSetService(initial_config)
+    app.state.document_sets = document_sets
 
     app.add_middleware(
         CORSMiddleware,
@@ -114,12 +138,89 @@ def create_app() -> FastAPI:
     def health_check() -> Dict[str, str]:
         return {"status": "ok"}
 
+    @app.post("/knowledge/document-sets")
+    def create_document_set() -> dict[str, Any]:
+        return document_sets.create().to_dict()
+
+    @app.post("/knowledge/document-sets/{document_set_id}/files")
+    async def upload_document_set_files(
+        document_set_id: str,
+        files: list[UploadFile] = File(...),
+    ) -> dict[str, Any]:
+        if len(files) > initial_config.max_upload_files:
+            raise HTTPException(status_code=400, detail="上传文件数量超过限制。")
+        uploads: list[DocumentUpload] = []
+        total_size = 0
+        try:
+            for item in files:
+                content = await item.read(initial_config.max_upload_file_size + 1)
+                if len(content) > initial_config.max_upload_file_size:
+                    raise HTTPException(status_code=413, detail="单个上传文件超过大小限制。")
+                total_size += len(content)
+                if total_size > initial_config.max_upload_total_size:
+                    raise HTTPException(status_code=413, detail="本次上传文件总大小超过限制。")
+                uploads.append(
+                    DocumentUpload(
+                        filename=item.filename or "document.txt",
+                        content=content,
+                    )
+                )
+        finally:
+            for item in files:
+                await item.close()
+
+        try:
+            return document_sets.add_files(document_set_id, uploads).to_dict()
+        except DocumentSetNotFound as exc:
+            raise HTTPException(status_code=404, detail="文档集不存在。") from exc
+        except DocumentValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except DocumentIndexingError as exc:
+            raise HTTPException(status_code=503, detail="文档索引构建失败。") from exc
+
+    @app.get("/knowledge/document-sets/{document_set_id}")
+    def get_document_set(document_set_id: str) -> dict[str, Any]:
+        try:
+            return document_sets.get(document_set_id).to_dict()
+        except DocumentSetNotFound as exc:
+            raise HTTPException(status_code=404, detail="文档集不存在。") from exc
+        except DocumentSetNotReady as exc:
+            raise HTTPException(status_code=409, detail="文档集状态不可用。") from exc
+
+    def build_agent(payload: ResearchRequest) -> DeepResearchAgent:
+        config = _build_config(payload)
+        knowledge: KnowledgeService | None = None
+        if payload.research_mode in {ResearchMode.DOCUMENT, ResearchMode.HYBRID}:
+            if not payload.document_set_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Document/Hybrid 模式必须提供 document_set_id。",
+                )
+            try:
+                knowledge = document_sets.get_knowledge_service(payload.document_set_id)
+            except DocumentSetNotFound as exc:
+                raise HTTPException(status_code=404, detail="文档集不存在。") from exc
+            except DocumentSetNotReady as exc:
+                raise HTTPException(status_code=409, detail="文档集尚未就绪。") from exc
+
+        return DeepResearchAgent(
+            config=config,
+            research_mode=payload.research_mode,
+            document_set_id=(
+                payload.document_set_id
+                if payload.research_mode is not ResearchMode.WEB
+                else None
+            ),
+            knowledge=knowledge,
+        )
+
     @app.post("/research", response_model=ResearchResponse)
     def run_research(payload: ResearchRequest) -> ResearchResponse:
         try:
-            config = _build_config(payload)
-            agent = DeepResearchAgent(config=config)
+            agent = build_agent(payload)
             result = agent.run(payload.topic)
+        except HTTPException:
+            raise
         except ValueError as exc:  # Likely due to unsupported configuration
             logger.error(
                 "Invalid synchronous research request: {}",
@@ -150,20 +251,28 @@ def create_app() -> FastAPI:
                 "retrieval_confidence": item.retrieval_confidence,
                 "freshness_required": item.freshness_required,
                 "retrieval_metrics_ms": item.retrieval_metrics_ms,
+                "notices": item.notices,
             }
             for item in result.todo_items
         ]
 
         return ResearchResponse(
             report_markdown=(result.report_markdown or result.running_summary or ""),
+            research_mode=payload.research_mode,
+            document_set_id=(
+                payload.document_set_id
+                if payload.research_mode is not ResearchMode.WEB
+                else None
+            ),
             todo_items=todo_payload,
         )
 
     @app.post("/research/stream")
     def stream_research(payload: ResearchRequest) -> StreamingResponse:
         try:
-            config = _build_config(payload)
-            agent = DeepResearchAgent(config=config)
+            agent = build_agent(payload)
+        except HTTPException:
+            raise
         except ValueError as exc:
             logger.error(
                 "Invalid streaming research request: {}",

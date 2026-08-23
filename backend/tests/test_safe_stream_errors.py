@@ -70,8 +70,8 @@ def test_task_failure_sse_does_not_leak_raw_exception(caplog) -> None:
 
 def test_outer_stream_error_does_not_leak_raw_exception(monkeypatch) -> None:
     class FailingStreamingAgent:
-        def __init__(self, config=None) -> None:
-            self.config = config
+        def __init__(self, **kwargs) -> None:
+            self.config = kwargs.get("config")
 
         def run_stream(self, topic: str):
             raise RuntimeError(SENSITIVE_ERROR)

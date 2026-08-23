@@ -9,6 +9,7 @@ from hello_agents import ToolAwareSimpleAgent
 from config import Configuration
 from models import SummaryState
 from services.text_processing import strip_tool_calls
+from services.user_messages import DOCUMENT_EVIDENCE_INSUFFICIENT
 from utils import strip_thinking_tokens
 
 
@@ -21,6 +22,11 @@ class ReportingService:
 
     def generate_report(self, state: SummaryState) -> str:
         """Generate a structured report based on completed tasks."""
+
+        if not any(task.source_items for task in state.todo_items):
+            if state.research_mode == "document":
+                return f"# 资料不足\n\n{DOCUMENT_EVIDENCE_INSUFFICIENT}"
+            return "# 资料不足\n\n当前允许的信息源未提供足够证据，未生成研究结论。"
 
         tasks_block = []
         for task in state.todo_items:
@@ -56,8 +62,18 @@ class ReportingService:
             ensure_ascii=False,
         )
 
+        if state.research_mode == "document":
+            grounding = (
+                "报告只能使用 [Document] 来源；禁止使用 Web 或模型自身知识补充事实。"
+            )
+        elif state.research_mode == "hybrid":
+            grounding = "报告必须明确区分 [Document] 与 [Web] 来源。"
+        else:
+            grounding = "报告只能使用 [Web] 来源。"
+
         prompt = (
             f"研究主题：{state.research_topic}\n"
+            f"信息源约束：{grounding}\n"
             f"任务概览：\n{''.join(tasks_block)}\n"
             f"可用任务笔记：\n{notes_section}\n"
             f"请针对每条任务笔记使用格式：[TOOL_CALL:note:{read_template}] 读取内容，整合所有信息后撰写报告。\n"

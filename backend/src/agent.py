@@ -21,16 +21,17 @@ from prompts import (
     task_summarizer_instructions,
     todo_planner_system_prompt,
 )
+from research_mode import ResearchMode
 from services.knowledge import KnowledgeService
 from services.log_redaction import redact_sensitive_text
 from services.planner import PlanningService
 from services.relevance_gate import KnowledgeRelevanceGate
 from services.reporter import ReportingService
 from services.research import EvidenceBundle, gather_research_evidence
-from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
+from services.retrieval_router import RetrievalRoute, RetrievalRouter, RoutingDecision
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
-from services.user_messages import TASK_EXECUTION_FAILED
+from services.user_messages import DOCUMENT_EVIDENCE_INSUFFICIENT, TASK_EXECUTION_FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,23 @@ logger = logging.getLogger(__name__)
 class DeepResearchAgent:
     """Coordinator orchestrating TODO-based research workflow using HelloAgents."""
 
-    def __init__(self, config: Configuration | None = None) -> None:
+    def __init__(
+        self,
+        config: Configuration | None = None,
+        *,
+        research_mode: ResearchMode = ResearchMode.WEB,
+        document_set_id: str | None = None,
+        knowledge: KnowledgeService | None = None,
+    ) -> None:
         """Initialise the coordinator with configuration and shared tools."""
         self.config = config or Configuration.from_env()
+        self.research_mode = research_mode
+        self.document_set_id = document_set_id
+        if (
+            research_mode in {ResearchMode.DOCUMENT, ResearchMode.HYBRID}
+            and knowledge is None
+        ):
+            raise ValueError("Document and Hybrid research require a ready document set")
         self.llm = self._init_llm()
 
         self.note_tool = (
@@ -77,19 +92,12 @@ class DeepResearchAgent:
         self.planner = PlanningService(self.todo_agent, self.config)
         self.summarizer = SummarizationService(self._summarizer_factory, self.config)
         self.reporting = ReportingService(self.report_agent, self.config)
-        self.knowledge = KnowledgeService(self.config)
+        self.knowledge = knowledge
         self.relevance_gate = KnowledgeRelevanceGate(self.config)
-        self.router = RetrievalRouter(
-            self.config,
-            AgentFactoryRouterProvider(
-                lambda: ToolAwareSimpleAgent(
-                    name="检索路由专家",
-                    llm=self.llm,
-                    system_prompt="根据任务上下文和 Knowledge Catalog 输出严格 JSON 检索路由。",
-                    enable_tool_calling=False,
-                    tool_registry=None,
-                )
-            ),
+        self.router = (
+            RetrievalRouter(self.config)
+            if research_mode is ResearchMode.HYBRID
+            else None
         )
         self._last_search_notices: list[str] = []
 
@@ -144,7 +152,12 @@ class DeepResearchAgent:
 
     def run(self, topic: str) -> SummaryStateOutput:
         """Execute the research workflow and return the final report."""
-        state = SummaryState(research_topic=topic)
+        mode = getattr(self, "research_mode", None)
+        state = SummaryState(
+            research_topic=topic,
+            research_mode=mode.value if mode is not None else "hybrid",
+            document_set_id=getattr(self, "document_set_id", None),
+        )
         state.todo_items = self.planner.plan_todo_list(state)
         self._drain_tool_events(state)
 
@@ -169,9 +182,19 @@ class DeepResearchAgent:
 
     def run_stream(self, topic: str) -> Iterator[dict[str, Any]]:
         """Execute the workflow yielding incremental progress events."""
-        state = SummaryState(research_topic=topic)
+        mode = getattr(self, "research_mode", None)
+        state = SummaryState(
+            research_topic=topic,
+            research_mode=mode.value if mode is not None else "hybrid",
+            document_set_id=getattr(self, "document_set_id", None),
+        )
         logger.debug("Starting streaming research: topic=%s", topic)
         yield {"type": "status", "message": "初始化研究流程"}
+        yield {
+            "type": "research_mode",
+            "mode": mode.value if mode is not None else "hybrid",
+            "document_set_id": getattr(self, "document_set_id", None),
+        }
 
         state.todo_items = self.planner.plan_todo_list(state)
         for event in self._drain_tool_events(state, step=0):
@@ -320,7 +343,11 @@ class DeepResearchAgent:
 
         if not evidence.available:
             task.status = "skipped"
-            task.summary = "当前可用来源未提供足够证据。"
+            task.summary = (
+                DOCUMENT_EVIDENCE_INSUFFICIENT
+                if getattr(self, "research_mode", None) is ResearchMode.DOCUMENT
+                else "当前允许的信息源未提供足够证据。"
+            )
             task.retrieval_metrics_ms["total_task"] = (
                 perf_counter() - task_started
             ) * 1000
@@ -343,13 +370,43 @@ class DeepResearchAgent:
         """Run routing and retrieval as a direct shared side-effecting operation."""
 
         task.status = "in_progress"
-        catalog, catalog_notices = self.knowledge.get_catalog()
+        mode = getattr(self, "research_mode", None)
+        catalog_notices: list[str] = []
         router_started = perf_counter()
-        decision = self.router.route(
-            research_topic=state.research_topic,
-            task=task,
-            knowledge_catalog=catalog,
-        )
+        if mode is ResearchMode.WEB:
+            decision = RoutingDecision(
+                route=RetrievalRoute.WEB,
+                reason="用户选择联网研究。",
+                confidence=1.0,
+                knowledge_query=None,
+                web_query=task.query,
+                freshness_required=False,
+            )
+        elif mode is ResearchMode.DOCUMENT:
+            decision = RoutingDecision(
+                route=RetrievalRoute.KNOWLEDGE,
+                reason="用户选择仅使用上传文档。",
+                confidence=1.0,
+                knowledge_query=task.query,
+                web_query=None,
+                freshness_required=False,
+            )
+        elif mode is ResearchMode.HYBRID:
+            decision = RoutingDecision(
+                route=RetrievalRoute.HYBRID,
+                reason="用户允许同时使用上传文档与互联网。",
+                confidence=1.0,
+                knowledge_query=task.query,
+                web_query=task.query,
+                freshness_required=False,
+            )
+        else:
+            catalog, catalog_notices = self.knowledge.get_catalog()
+            decision = self.router.route(
+                research_topic=state.research_topic,
+                task=task,
+                knowledge_catalog=catalog,
+            )
         router_latency_ms = (perf_counter() - router_started) * 1000
         task.retrieval_route = decision.route.value
         task.retrieval_reason = decision.reason
@@ -363,6 +420,7 @@ class DeepResearchAgent:
             self.knowledge,
             decision=decision,
             relevance_gate=self.relevance_gate,
+            mode=mode,
         )
         evidence.notices = [*catalog_notices, *evidence.notices]
         task.retrieval_metrics_ms = {
@@ -441,7 +499,11 @@ class DeepResearchAgent:
 
         if not evidence.available:
             task.status = "skipped"
-            task.summary = "当前可用来源未提供足够证据。"
+            task.summary = (
+                DOCUMENT_EVIDENCE_INSUFFICIENT
+                if getattr(self, "research_mode", None) is ResearchMode.DOCUMENT
+                else "当前允许的信息源未提供足够证据。"
+            )
             task.retrieval_metrics_ms["total_task"] = (
                 perf_counter() - task_started
             ) * 1000
@@ -452,6 +514,9 @@ class DeepResearchAgent:
                     "type": "task_status",
                     "task_id": task.id,
                     "status": "skipped",
+                    "summary": task.summary,
+                    "sources_summary": task.sources_summary,
+                    "sources": task.source_items,
                     "title": task.title,
                     "intent": task.intent,
                     "note_id": task.note_id,

@@ -12,3 +12,5 @@ TASK_EXECUTION_FAILED = "任务执行失败，详细原因已记录在服务端�
 STREAMING_RESEARCH_FAILED = "研究流程暂时不可用，详细原因已记录在服务端日志。"
 INVALID_RESEARCH_REQUEST = "研究请求或服务配置无效，请检查输入和服务端日志。"
 RESEARCH_FAILED = "研究流程执行失败，详细原因已记录在服务端日志。"
+DOCUMENT_UNAVAILABLE = "上传文档检索暂时不可用。"
+DOCUMENT_EVIDENCE_INSUFFICIENT = "当前上传文档未提供足够证据支持该结论。"

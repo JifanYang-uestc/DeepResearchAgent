@@ -77,5 +77,5 @@ def test_robotics_query_has_no_knowledge_sources() -> None:
     assert knowledge.calls == 0
     assert bundle.knowledge_results == []
     assert all(source.type == "web" for source in bundle.sources)
-    assert "[Knowledge]" not in bundle.sources_summary
+    assert "[Document]" not in bundle.sources_summary
 

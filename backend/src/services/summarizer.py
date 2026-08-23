@@ -114,12 +114,25 @@ class SummarizationService:
     def _build_prompt(self, state: SummaryState, task: TodoItem, context: str) -> str:
         """Construct the summarization prompt shared by both modes."""
 
+        if state.research_mode == "document":
+            grounding = (
+                "所有结论必须以上传文档 Evidence 为依据。禁止使用 Web，也不得将模型"
+                "自身知识包装成文档事实；证据不足时必须明确说明资料不足。"
+            )
+        elif state.research_mode == "hybrid":
+            grounding = (
+                "请明确区分 [Document] 与 [Web] Evidence，不得把 Web 内容标成文档证据。"
+            )
+        else:
+            grounding = "本任务只允许使用提供的 Web Evidence。"
+
         return (
             f"任务主题：{state.research_topic}\n"
             f"任务名称：{task.title}\n"
             f"任务目标：{task.intent}\n"
             f"检索查询：{task.query}\n"
             f"任务上下文：\n{context}\n"
+            f"信息源约束：{grounding}\n"
             f"{build_note_guidance(task)}\n"
             "请按照以上协作要求先同步笔记，然后返回一份面向用户的 Markdown 总结（仍遵循任务总结模板）。"
         )

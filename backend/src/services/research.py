@@ -9,6 +9,7 @@ from typing import Any, Callable, Literal
 
 from config import Configuration
 from rag.types import RetrievalResult
+from research_mode import ResearchMode
 from services.knowledge import KnowledgeService
 from services.log_redaction import redact_sensitive_text
 from services.relevance_gate import KnowledgeGateResult, KnowledgeRelevanceGate
@@ -18,7 +19,12 @@ from services.search import (
     normalize_search_response,
     prepare_research_context,
 )
-from services.user_messages import WEB_PROVIDER_NOTICE, WEB_UNAVAILABLE
+from services.user_messages import (
+    DOCUMENT_EVIDENCE_INSUFFICIENT,
+    DOCUMENT_UNAVAILABLE,
+    WEB_PROVIDER_NOTICE,
+    WEB_UNAVAILABLE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +88,12 @@ def gather_research_evidence(
     query: str,
     config: Configuration,
     loop_count: int,
-    knowledge: KnowledgeService,
+    knowledge: KnowledgeService | None,
     *,
     web_search: WebSearch = dispatch_search,
     decision: RoutingDecision | None = None,
     relevance_gate: KnowledgeRelevanceGate | None = None,
+    mode: ResearchMode | None = None,
 ) -> EvidenceBundle:
     """Execute the selected routes and admit only relevant knowledge evidence."""
 
@@ -107,20 +114,37 @@ def gather_research_evidence(
     knowledge_latency_ms: float | None = None
     web_latency_ms: float | None = None
 
-    run_knowledge = decision.route in (
-        RetrievalRoute.KNOWLEDGE,
-        RetrievalRoute.HYBRID,
-    )
-    run_web = decision.route in (RetrievalRoute.WEB, RetrievalRoute.HYBRID)
+    if mode is ResearchMode.WEB:
+        run_knowledge = False
+        run_web = True
+    elif mode is ResearchMode.DOCUMENT:
+        run_knowledge = True
+        run_web = False
+    elif mode is ResearchMode.HYBRID:
+        run_knowledge = True
+        run_web = True
+    else:
+        run_knowledge = decision.route in (
+            RetrievalRoute.KNOWLEDGE,
+            RetrievalRoute.HYBRID,
+        )
+        run_web = decision.route in (RetrievalRoute.WEB, RetrievalRoute.HYBRID)
 
     if run_knowledge:
         knowledge_started = perf_counter()
         knowledge_query = decision.knowledge_query or query
-        knowledge_results, knowledge_notices, knowledge_backend = _retrieve_candidates(
-            knowledge,
-            knowledge_query,
-            config.knowledge_probe_top_k,
-        )
+        if knowledge is None:
+            knowledge_results = []
+            knowledge_notices = [DOCUMENT_UNAVAILABLE]
+            knowledge_backend = "none"
+        else:
+            knowledge_results, knowledge_notices, knowledge_backend = (
+                _retrieve_candidates(
+                    knowledge,
+                    knowledge_query,
+                    config.knowledge_probe_top_k,
+                )
+            )
         notices.extend(knowledge_notices)
         gate_result = relevance_gate.filter(
             knowledge_query,
@@ -130,12 +154,18 @@ def gather_research_evidence(
         knowledge_results = gate_result.accepted
         if gate_result.rejected:
             notices.append(f"Knowledge Evidence 已拒绝：{gate_result.reason}")
-        if decision.route is RetrievalRoute.KNOWLEDGE and not knowledge_results:
+        if (
+            mode is None
+            and decision.route is RetrievalRoute.KNOWLEDGE
+            and not knowledge_results
+        ):
             run_web = True
             notices.append(
                 "Knowledge 路由未获得有效 Evidence，已回退到 Web Search。"
             )
         knowledge_latency_ms = (perf_counter() - knowledge_started) * 1000
+        if mode is ResearchMode.DOCUMENT and not knowledge_results:
+            notices.append(DOCUMENT_EVIDENCE_INSUFFICIENT)
 
     knowledge_sources, knowledge_context, structured_knowledge = _format_knowledge(
         knowledge_results
@@ -227,11 +257,11 @@ def _format_knowledge(
         chunk = result.chunk
         location = f"Page {chunk.page}" if chunk.page is not None else "Page N/A"
         source_lines.append(
-            f"[Knowledge] {chunk.document} ({location}, Chunk {chunk.chunk_id}, "
+            f"[Document] {chunk.document} ({location}, Chunk {chunk.chunk_id}, "
             f"Score {result.score:.4f})"
         )
         contexts.append(
-            f"[Knowledge Evidence {result.rank}]\n"
+            f"[Document Evidence {result.rank}]\n"
             f"Document: {chunk.document}\n"
             f"Page: {chunk.page if chunk.page is not None else 'N/A'}\n"
             f"Chunk ID: {chunk.chunk_id}\n"

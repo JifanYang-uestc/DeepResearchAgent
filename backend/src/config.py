@@ -127,6 +127,15 @@ class Configuration(BaseModel):
         title="Knowledge Auto Build",
         description="Build the FAISS index on first use when it is missing",
     )
+    document_sets_root: str = Field(
+        default="./runtime/document_sets",
+        title="Document Sets Root",
+        description="Runtime storage for isolated uploaded-document indexes",
+    )
+    max_upload_files: int = Field(default=10, ge=1)
+    max_upload_file_size: int = Field(default=20 * 1024 * 1024, ge=1)
+    max_upload_total_size: int = Field(default=50 * 1024 * 1024, ge=1)
+    document_index_cache_size: int = Field(default=8, ge=1)
     fetch_full_page: bool = Field(
         default=True,
         title="Fetch Full Page",
@@ -216,6 +225,11 @@ class Configuration(BaseModel):
             "knowledge_chunk_size": os.getenv("KNOWLEDGE_CHUNK_SIZE"),
             "knowledge_chunk_overlap": os.getenv("KNOWLEDGE_CHUNK_OVERLAP"),
             "knowledge_auto_build": os.getenv("KNOWLEDGE_AUTO_BUILD"),
+            "document_sets_root": os.getenv("DOCUMENT_SETS_ROOT"),
+            "max_upload_files": os.getenv("MAX_UPLOAD_FILES"),
+            "max_upload_file_size": os.getenv("MAX_UPLOAD_FILE_SIZE"),
+            "max_upload_total_size": os.getenv("MAX_UPLOAD_TOTAL_SIZE"),
+            "document_index_cache_size": os.getenv("DOCUMENT_INDEX_CACHE_SIZE"),
             "cors_origins": os.getenv("CORS_ORIGINS"),
         }
 

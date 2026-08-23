@@ -29,6 +29,7 @@ logs/
 # Runtime
 notes/
 workspace/
+runtime/
 
 # RAG generated data
 vector_store/
