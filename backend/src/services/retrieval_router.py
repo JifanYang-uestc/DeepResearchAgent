@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol
 
 from config import Configuration
@@ -50,6 +51,24 @@ class RouterDecisionProvider(Protocol):
 
     def run(self, prompt: str) -> str:
         """Return a JSON routing decision."""
+
+
+class AgentFactoryRouterProvider:
+    """Create an isolated router agent for each concurrent TODO decision."""
+
+    def __init__(self, factory: Callable[[], RouterDecisionProvider]) -> None:
+        self._factory = factory
+
+    def run(self, prompt: str) -> str:
+        """Run and dispose one short-lived structured routing conversation."""
+
+        agent = self._factory()
+        try:
+            return agent.run(prompt)
+        finally:
+            clear_history = getattr(agent, "clear_history", None)
+            if callable(clear_history):
+                clear_history()
 
 
 @dataclass(frozen=True, slots=True)

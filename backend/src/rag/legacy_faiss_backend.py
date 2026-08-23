@@ -9,10 +9,11 @@ from threading import Lock
 from config import Configuration
 
 from .base import KnowledgeDocumentInfo
+from .catalog import build_knowledge_catalog
 from .chunker import chunk_documents
 from .loader import load_documents
 from .retriever import KnowledgeRetriever
-from .types import KnowledgeChunk, RetrievalResult
+from .types import RetrievalResult
 from .vector_store import FaissVectorStore
 
 logger = logging.getLogger(__name__)
@@ -46,10 +47,11 @@ class LegacyFaissBackend:
         return True
 
     def get_catalog(self) -> list[KnowledgeDocumentInfo]:
-        """Build a compact catalog from indexed chunk metadata."""
+        """Build a compact catalog without loading the vector index."""
 
-        self._get_retriever()
-        return _catalog_from_chunks(self._store.chunks if self._store else ())
+        return build_knowledge_catalog(
+            resolve_backend_path(self._config.knowledge_base_path)
+        )
 
     def _get_retriever(self) -> KnowledgeRetriever:
         if self._retriever is not None:
@@ -101,31 +103,3 @@ def resolve_backend_path(value: str) -> Path:
     if working_path.exists():
         return working_path
     return (BACKEND_DIR / path).resolve()
-
-
-def _catalog_from_chunks(
-    chunks: tuple[KnowledgeChunk, ...] | list[KnowledgeChunk],
-) -> list[KnowledgeDocumentInfo]:
-    documents: dict[str, dict[str, object]] = {}
-    for chunk in chunks:
-        entry = documents.setdefault(
-            chunk.document,
-            {"file_type": chunk.file_type, "pages": set()},
-        )
-        if chunk.page is not None:
-            pages = entry["pages"]
-            if isinstance(pages, set):
-                pages.add(chunk.page)
-
-    catalog: list[KnowledgeDocumentInfo] = []
-    for document, entry in sorted(documents.items()):
-        indexed_pages = entry["pages"]
-        page_count = len(indexed_pages) if isinstance(indexed_pages, set) and indexed_pages else 1
-        catalog.append(
-            KnowledgeDocumentInfo(
-                document=document,
-                file_type=str(entry["file_type"]),
-                pages=page_count,
-            )
-        )
-    return catalog

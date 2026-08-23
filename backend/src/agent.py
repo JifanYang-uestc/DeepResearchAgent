@@ -24,6 +24,8 @@ from services.planner import PlanningService
 from services.reporter import ReportingService
 from services.knowledge import KnowledgeService
 from services.research import gather_research_evidence
+from services.relevance_gate import KnowledgeRelevanceGate
+from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
 
@@ -73,6 +75,19 @@ class DeepResearchAgent:
         self.summarizer = SummarizationService(self._summarizer_factory, self.config)
         self.reporting = ReportingService(self.report_agent, self.config)
         self.knowledge = KnowledgeService(self.config)
+        self.relevance_gate = KnowledgeRelevanceGate(self.config)
+        self.router = RetrievalRouter(
+            self.config,
+            AgentFactoryRouterProvider(
+                lambda: ToolAwareSimpleAgent(
+                    name="检索路由专家",
+                    llm=self.llm,
+                    system_prompt="根据任务上下文和 Knowledge Catalog 输出严格 JSON 检索路由。",
+                    enable_tool_calling=False,
+                    tool_registry=None,
+                )
+            ),
+        )
         self._last_search_notices: list[str] = []
 
     # ------------------------------------------------------------------
@@ -299,12 +314,26 @@ class DeepResearchAgent:
         """Run search + summarization for a single task."""
         task.status = "in_progress"
 
+        catalog, catalog_notices = self.knowledge.get_catalog()
+        decision = self.router.route(
+            research_topic=state.research_topic,
+            task=task,
+            knowledge_catalog=catalog,
+        )
+        task.retrieval_route = decision.route.value
+        task.retrieval_reason = decision.reason
+        task.retrieval_confidence = decision.confidence
+        task.freshness_required = decision.freshness_required
+
         evidence = gather_research_evidence(
             task.query,
             self.config,
             state.research_loop_count,
             self.knowledge,
+            decision=decision,
+            relevance_gate=self.relevance_gate,
         )
+        evidence.notices = [*catalog_notices, *evidence.notices]
         self._last_search_notices = evidence.notices
         task.notices = evidence.notices
 
@@ -446,6 +475,10 @@ class DeepResearchAgent:
             "note_id": task.note_id,
             "note_path": task.note_path,
             "stream_token": task.stream_token,
+            "retrieval_route": task.retrieval_route,
+            "retrieval_reason": task.retrieval_reason,
+            "retrieval_confidence": task.retrieval_confidence,
+            "freshness_required": task.freshness_required,
         }
 
     def _persist_final_report(self, state: SummaryState, report: str) -> dict[str, Any] | None:

@@ -12,8 +12,9 @@ import numpy as np
 from config import Configuration
 
 from .base import KnowledgeDocumentInfo
+from .catalog import build_knowledge_catalog
 from .chunker import chunk_documents
-from .legacy_faiss_backend import _catalog_from_chunks, resolve_backend_path
+from .legacy_faiss_backend import resolve_backend_path
 from .loader import load_documents
 from .retriever import KnowledgeRetriever
 from .types import RetrievalResult
@@ -106,10 +107,11 @@ class HelloAgentsSemanticBackend:
         return True
 
     def get_catalog(self) -> list[KnowledgeDocumentInfo]:
-        """Return indexed document metadata without sending chunks upstream."""
+        """Return document metadata without loading the semantic model."""
 
-        self._get_retriever()
-        return _catalog_from_chunks(self._store.chunks if self._store else ())
+        return build_knowledge_catalog(
+            resolve_backend_path(self._config.knowledge_base_path)
+        )
 
     def _get_retriever(self) -> KnowledgeRetriever:
         if self._retriever is not None:
