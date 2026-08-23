@@ -11,7 +11,6 @@ from rag.types import KnowledgeChunk, RetrievalResult
 from services.research import gather_research_evidence
 from services.retrieval_router import RetrievalRoute, RetrievalRouter
 
-
 CATALOG = [
     KnowledgeDocumentInfo("rag_2020.pdf", "pdf", 19),
     KnowledgeDocumentInfo("react.pdf", "pdf", 33),

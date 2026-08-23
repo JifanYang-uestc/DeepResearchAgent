@@ -6,11 +6,11 @@ import json
 import logging
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from collections.abc import Callable
 from typing import Protocol
 
 from config import Configuration
@@ -40,6 +40,8 @@ class RoutingDecision:
     freshness_required: bool
 
     def __post_init__(self) -> None:
+        """Validate routing confidence and observability fields."""
+
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("Routing confidence must be between 0 and 1")
         if not self.reason.strip():

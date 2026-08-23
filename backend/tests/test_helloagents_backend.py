@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 
 from config import Configuration
-from rag.helloagents_backend import HelloAgentsLocalEmbedding, HelloAgentsSemanticBackend
+from rag.helloagents_backend import (
+    HelloAgentsLocalEmbedding,
+    HelloAgentsSemanticBackend,
+)
 
 
 class FakeSemanticEmbedding:

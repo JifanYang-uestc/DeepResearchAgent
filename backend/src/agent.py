@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
-from time import perf_counter
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
+from time import perf_counter
 from typing import Any, Callable, Iterator
 
 from hello_agents import HelloAgentsLLM, ToolAwareSimpleAgent
@@ -15,17 +15,17 @@ from hello_agents.tools import ToolRegistry
 from hello_agents.tools.builtin.note_tool import NoteTool
 
 from config import Configuration
+from models import SummaryState, SummaryStateOutput, TodoItem
 from prompts import (
     report_writer_instructions,
     task_summarizer_instructions,
     todo_planner_system_prompt,
 )
-from models import SummaryState, SummaryStateOutput, TodoItem
-from services.planner import PlanningService
-from services.reporter import ReportingService
 from services.knowledge import KnowledgeService
-from services.research import gather_research_evidence
+from services.planner import PlanningService
 from services.relevance_gate import KnowledgeRelevanceGate
+from services.reporter import ReportingService
+from services.research import gather_research_evidence
 from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker

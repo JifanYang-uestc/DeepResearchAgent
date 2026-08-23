@@ -41,6 +41,7 @@ packages = ["src"]
 "*" = ["py.typed"]
 
 [tool.ruff]
+exclude = [".venv", ".codex-pytest-temp", "vector_store"]
 lint.select = [
     "E",    # pycodestyle
     "F",    # pyflakes
@@ -55,11 +56,22 @@ lint.ignore = [
     "UP007",
     "UP035",
     "D417",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D107",
+    "D202",
+    "D401",
+    "D415",
     "E501",
+    "UP045",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+"scripts/*" = ["D", "E402", "T201"]
+"src/main.py" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

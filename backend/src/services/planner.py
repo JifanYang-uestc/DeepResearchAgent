@@ -9,8 +9,8 @@ from typing import Any, List, Optional
 
 from hello_agents import ToolAwareSimpleAgent
 
-from models import SummaryState, TodoItem
 from config import Configuration
+from models import SummaryState, TodoItem
 from prompts import get_current_date, todo_planner_instructions
 from utils import strip_thinking_tokens
 

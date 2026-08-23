@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any, Optional, Tuple
 
 from hello_agents.tools import SearchTool
@@ -17,7 +18,13 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS_PER_SOURCE = 2000
-_GLOBAL_SEARCH_TOOL = SearchTool(backend="hybrid")
+
+
+@lru_cache(maxsize=1)
+def _get_search_tool() -> SearchTool:
+    """Create the HelloAgents search client only when Web evidence is requested."""
+
+    return SearchTool(backend="hybrid")
 
 
 def dispatch_search(
@@ -30,7 +37,7 @@ def dispatch_search(
     search_api = get_config_value(config.search_api)
 
     try:
-        raw_response = _GLOBAL_SEARCH_TOOL.run(
+        raw_response = _get_search_tool().run(
             {
                 "input": query,
                 "backend": search_api,

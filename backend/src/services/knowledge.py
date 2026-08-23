@@ -100,6 +100,15 @@ class KnowledgeService:
                     logger.warning("Fallback knowledge catalog unavailable: %s", fallback_exc)
             return [], [f"Knowledge Catalog 不可用：{exc}"]
 
+    def prepare(self) -> tuple[bool, list[str]]:
+        """Load or build the configured primary backend for setup commands."""
+
+        if not self._config.enable_knowledge_rag:
+            return False, ["Knowledge RAG 已禁用，无法准备索引。"]
+        if self._backend.health_check():
+            return True, []
+        return False, [f"Knowledge Backend {self._backend.name} 准备失败，请检查日志。"]
+
     @property
     def backend_name(self) -> str:
         """Expose the configured backend name for diagnostics."""

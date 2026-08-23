@@ -6,17 +6,17 @@ import json
 import sys
 from typing import Any, Dict, Iterator, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import Configuration, SearchAPI
 from agent import DeepResearchAgent
+from config import Configuration, SearchAPI
 
 # 添加控制台日志处理程序
 logger.add(
