@@ -74,8 +74,11 @@ class AgentFactoryRouterProvider:
 
 
 @dataclass(frozen=True, slots=True)
-class _RoutingSignals:
-    freshness_required: bool
+class RoutingSignals:
+    """Task-level hard boundaries plus global context for LLM routing."""
+
+    task_freshness_required: bool
+    global_freshness_context: bool
     explicit_local_request: bool
     matched_documents: tuple[str, ...]
 
@@ -112,7 +115,7 @@ class RetrievalRouter:
                 confidence=1.0,
                 knowledge_query=task.query,
                 web_query=task.query,
-                freshness_required=signals.freshness_required,
+                freshness_required=signals.task_freshness_required,
             )
 
         if self._decision_provider is None:
@@ -145,8 +148,9 @@ def _collect_signals(
     research_topic: str,
     task: TodoItem,
     catalog: list[KnowledgeDocumentInfo],
-) -> _RoutingSignals:
-    text = _normalize(" ".join((research_topic, task.title, task.intent, task.query)))
+) -> RoutingSignals:
+    task_text = _normalize(" ".join((task.title, task.intent, task.query)))
+    global_text = _normalize(research_topic)
     freshness_terms = (
         "最新",
         "当前",
@@ -179,12 +183,16 @@ def _collect_signals(
     matched = tuple(
         entry.document
         for entry in catalog
-        if _document_matches(text, entry.document)
+        if _document_matches(task_text, entry.document)
     )
-    explicit_filename = any(_normalize(entry.document) in text for entry in catalog)
-    return _RoutingSignals(
-        freshness_required=any(term in text for term in freshness_terms),
-        explicit_local_request=explicit_filename or any(term in text for term in local_terms),
+    explicit_filename = any(
+        _normalize(entry.document) in task_text for entry in catalog
+    )
+    return RoutingSignals(
+        task_freshness_required=any(term in task_text for term in freshness_terms),
+        global_freshness_context=any(term in global_text for term in freshness_terms),
+        explicit_local_request=explicit_filename
+        or any(term in task_text for term in local_terms),
         matched_documents=matched,
     )
 
@@ -202,12 +210,14 @@ def _document_matches(text: str, document: str) -> bool:
 
 def _deterministic_decision(
     task: TodoItem,
-    signals: _RoutingSignals,
+    signals: RoutingSignals,
     catalog: list[KnowledgeDocumentInfo],
 ) -> RoutingDecision:
     query = task.query.strip()
     has_catalog_match = bool(signals.matched_documents)
-    if signals.freshness_required and (has_catalog_match or signals.explicit_local_request):
+    if signals.task_freshness_required and (
+        has_catalog_match or signals.explicit_local_request
+    ):
         documents = ", ".join(signals.matched_documents) or "本地知识库"
         return RoutingDecision(
             route=RetrievalRoute.HYBRID,
@@ -217,7 +227,7 @@ def _deterministic_decision(
             web_query=query,
             freshness_required=True,
         )
-    if signals.freshness_required and not has_catalog_match:
+    if signals.task_freshness_required and not has_catalog_match:
         catalog_names = ", ".join(item.document for item in catalog) or "空"
         return RoutingDecision(
             route=RetrievalRoute.WEB,
@@ -253,7 +263,7 @@ def _build_router_prompt(
     task: TodoItem,
     current_date: str,
     knowledge_catalog: list[KnowledgeDocumentInfo],
-    signals: _RoutingSignals,
+    signals: RoutingSignals,
 ) -> str:
     catalog = [entry.to_dict() for entry in knowledge_catalog]
     return (
@@ -267,7 +277,8 @@ def _build_router_prompt(
         f"任务意图：{task.intent}\n"
         f"任务查询：{task.query}\n"
         f"Knowledge Catalog：{json.dumps(catalog, ensure_ascii=False)}\n"
-        f"确定性信号：freshness={signals.freshness_required}, "
+        f"确定性信号：task_freshness={signals.task_freshness_required}, "
+        f"global_freshness_context={signals.global_freshness_context}, "
         f"explicit_local={signals.explicit_local_request}, "
         f"matched_documents={list(signals.matched_documents)}\n"
         "输出字段：route, reason, confidence, knowledge_query, web_query, freshness_required"
@@ -277,7 +288,7 @@ def _build_router_prompt(
 def _parse_decision(
     raw: str,
     task: TodoItem,
-    signals: _RoutingSignals,
+    signals: RoutingSignals,
 ) -> RoutingDecision:
     start = raw.find("{")
     end = raw.rfind("}")
@@ -301,24 +312,22 @@ def _parse_decision(
         confidence=float(payload.get("confidence", 0.5)),
         knowledge_query=knowledge_query,
         web_query=web_query,
-        freshness_required=bool(
-            payload.get("freshness_required", signals.freshness_required)
-        ),
+        freshness_required=signals.task_freshness_required,
     )
 
 
 def _enforce_hard_boundaries(
     decision: RoutingDecision,
     fallback: RoutingDecision,
-    signals: _RoutingSignals,
+    signals: RoutingSignals,
 ) -> RoutingDecision:
-    if signals.freshness_required and not signals.matched_documents:
+    if signals.task_freshness_required and not signals.matched_documents:
         return fallback
-    if signals.freshness_required and (
+    if signals.task_freshness_required and (
         signals.matched_documents or signals.explicit_local_request
     ):
         return fallback
-    if signals.matched_documents and not signals.freshness_required:
+    if signals.matched_documents and not signals.task_freshness_required:
         return fallback
     return decision
 

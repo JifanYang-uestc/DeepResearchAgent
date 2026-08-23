@@ -111,3 +111,99 @@ def test_structured_router_receives_full_context_and_catalog() -> None:
     assert "调查量子纠错" in provider.prompt
     assert "rag_2020.pdf" in provider.prompt
     assert "2026-08-23" in provider.prompt
+
+
+MIXED_TOPIC = "对比 RAG、ReAct，并分析 2026 最新 Agentic RAG 趋势"
+
+
+def test_global_freshness_does_not_force_theory_todo_hybrid() -> None:
+    theory_task = TodoItem(
+        id=1,
+        title="解释 ReAct 原理",
+        intent="说明稳定的理论机制",
+        query="ReAct reasoning and acting 原理",
+    )
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=MIXED_TOPIC,
+        task=theory_task,
+        knowledge_catalog=CATALOG,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route is RetrievalRoute.KNOWLEDGE
+    assert decision.freshness_required is False
+
+
+def test_fresh_todo_still_routes_web_or_hybrid() -> None:
+    fresh_task = TodoItem(
+        id=2,
+        title="分析最新趋势",
+        intent="调查 2026 年最新进展",
+        query="2026 年 Agentic RAG 最新趋势",
+    )
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=MIXED_TOPIC,
+        task=fresh_task,
+        knowledge_catalog=CATALOG,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route in {RetrievalRoute.WEB, RetrievalRoute.HYBRID}
+    assert decision.freshness_required is True
+
+
+def test_llm_knowledge_route_is_not_overridden_by_global_freshness() -> None:
+    class TheoryProvider:
+        def run(self, prompt: str) -> str:
+            assert "global_freshness_context=True" in prompt
+            assert "task_freshness=False" in prompt
+            return (
+                '{"route":"knowledge","reason":"stable theory task",'
+                '"confidence":0.9,"knowledge_query":"ReAct principles",'
+                '"web_query":null}'
+            )
+
+    task = TodoItem(
+        id=3,
+        title="解释 ReAct 原理",
+        intent="说明稳定理论",
+        query="ReAct reasoning and acting 原理",
+    )
+    decision = RetrievalRouter(Configuration(), TheoryProvider()).route(
+        research_topic=MIXED_TOPIC,
+        task=task,
+        knowledge_catalog=CATALOG,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route is RetrievalRoute.KNOWLEDGE
+    assert decision.freshness_required is False
+
+
+def test_mixed_topic_routes_each_todo_independently() -> None:
+    router = RetrievalRouter(Configuration())
+    theory = router.route(
+        research_topic=MIXED_TOPIC,
+        task=TodoItem(
+            id=1,
+            title="ReAct 原理",
+            intent="解释 reasoning and acting",
+            query="ReAct reasoning and acting 原理",
+        ),
+        knowledge_catalog=CATALOG,
+    )
+    fresh = router.route(
+        research_topic=MIXED_TOPIC,
+        task=TodoItem(
+            id=2,
+            title="2026 Agentic RAG 最新趋势",
+            intent="调查最新发展趋势",
+            query="2026 Agentic RAG 最新趋势",
+        ),
+        knowledge_catalog=CATALOG,
+    )
+
+    assert theory.route is RetrievalRoute.KNOWLEDGE
+    assert fresh.route in {RetrievalRoute.WEB, RetrievalRoute.HYBRID}
