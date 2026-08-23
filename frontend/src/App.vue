@@ -34,10 +34,62 @@
             ></textarea>
           </label>
 
+          <section class="upload-card">
+            <div class="upload-heading">
+              <div>
+                <strong>参考资料（可选）</strong>
+                <p>支持 PDF、TXT、MD、Markdown；资料会建立独立研究索引。</p>
+              </div>
+              <label class="upload-button">
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.txt,.md,.markdown"
+                  :disabled="loading"
+                  @change="handleFileSelection"
+                />
+                + 选择文件
+              </label>
+            </div>
+            <ul v-if="uploadedFiles.length" class="upload-list">
+              <li v-for="(file, index) in uploadedFiles" :key="`${file.name}-${index}`">
+                <span>✓ {{ file.name }}</span>
+                <button type="button" :disabled="loading" @click="removeFile(index)">
+                  移除
+                </button>
+              </li>
+            </ul>
+            <p v-if="uploadStatus" class="upload-status">{{ uploadStatus }}</p>
+            <p v-if="documentSet?.status === 'ready'" class="upload-stats">
+              知识库就绪：{{ documentSet.documents }} 个文档 ·
+              {{ documentSet.pages }} 页 · {{ documentSet.chunks }} 个片段
+            </p>
+          </section>
+
+          <section class="scope-card">
+            <strong>研究范围</strong>
+            <p v-if="!uploadedFiles.length" class="scope-web">
+              联网研究（未上传资料时自动使用 Web Only）
+            </p>
+            <div v-else class="scope-options">
+              <label>
+                <input v-model="form.researchMode" type="radio" value="hybrid" />
+                <span>文档 + 互联网</span>
+              </label>
+              <label>
+                <input v-model="form.researchMode" type="radio" value="document" />
+                <span>仅使用上传文档</span>
+              </label>
+            </div>
+          </section>
+
           <section class="options">
             <label class="field option">
               <span>搜索引擎</span>
-              <select v-model="form.searchApi">
+              <select
+                v-model="form.searchApi"
+                :disabled="effectiveResearchMode === 'document'"
+              >
                 <option value="">沿用后端配置</option>
                 <option
                   v-for="option in searchOptions"
@@ -109,9 +161,25 @@
             <p class="topic-display">{{ form.topic }}</p>
           </div>
 
-          <div class="info-item" v-if="form.searchApi">
+          <div
+            class="info-item"
+            v-if="form.searchApi && effectiveResearchMode !== 'document'"
+          >
             <label>搜索引擎</label>
             <p>{{ form.searchApi }}</p>
+          </div>
+
+          <div class="info-item">
+            <label>研究范围</label>
+            <p>{{ researchModeLabel }}</p>
+          </div>
+
+          <div class="info-item" v-if="documentSet?.status === 'ready'">
+            <label>上传资料</label>
+            <p>
+              {{ documentSet.documents }} 个文档 · {{ documentSet.pages }} 页 ·
+              {{ documentSet.chunks }} 个片段
+            </p>
           </div>
 
           <div class="info-item" v-if="totalTasks > 0">
@@ -258,7 +326,7 @@
                   >
                     <div class="source-heading">
                       <span class="source-kind" :class="item.type">
-                        {{ item.type === "knowledge" ? "Knowledge" : "Web" }}
+                        {{ item.type === "knowledge" ? "Document" : "Web" }}
                       </span>
                     <a
                       v-if="item.url"
@@ -365,7 +433,11 @@
 import { computed, onBeforeUnmount, reactive, ref } from "vue";
 
 import {
+  createDocumentSet,
   runResearchStream,
+  uploadDocumentSetFiles,
+  type DocumentSetResponse,
+  type ResearchMode,
   type ResearchStreamEvent
 } from "./services/api";
 
@@ -413,8 +485,13 @@ interface TodoTaskView {
 
 const form = reactive({
   topic: "",
-  searchApi: ""
+  searchApi: "",
+  researchMode: "hybrid" as Exclude<ResearchMode, "web">
 });
+
+const uploadedFiles = ref<File[]>([]);
+const documentSet = ref<DocumentSetResponse | null>(null);
+const uploadStatus = ref("");
 
 const loading = ref(false);
 const error = ref("");
@@ -452,10 +529,32 @@ function formatTaskStatus(status: string): string {
   return TASK_STATUS_LABEL[status] ?? status;
 }
 
+function formatResearchMode(mode: string): string {
+  if (mode === "document") {
+    return "仅使用上传文档";
+  }
+  if (mode === "hybrid") {
+    return "上传文档 + 互联网";
+  }
+  return "联网研究";
+}
+
 const totalTasks = computed(() => todoTasks.value.length);
 const completedTasks = computed(() =>
   todoTasks.value.filter((task) => task.status === "completed").length
 );
+const effectiveResearchMode = computed<ResearchMode>(() =>
+  uploadedFiles.value.length ? form.researchMode : "web"
+);
+const researchModeLabel = computed(() => {
+  if (effectiveResearchMode.value === "document") {
+    return "仅使用上传文档";
+  }
+  if (effectiveResearchMode.value === "hybrid") {
+    return "上传文档 + 互联网";
+  }
+  return "联网研究";
+});
 
 const currentTask = computed(() => {
   if (activeTaskId.value !== null) {
@@ -724,6 +823,50 @@ function resetWorkflowState() {
   logsCollapsed.value = false;
 }
 
+function resetDocumentSet(): void {
+  documentSet.value = null;
+  uploadStatus.value = "";
+}
+
+function handleFileSelection(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const selected = Array.from(input.files ?? []);
+  if (!selected.length) {
+    return;
+  }
+  uploadedFiles.value = [...uploadedFiles.value, ...selected].slice(0, 10);
+  form.researchMode = "hybrid";
+  resetDocumentSet();
+  input.value = "";
+}
+
+function removeFile(index: number): void {
+  uploadedFiles.value.splice(index, 1);
+  resetDocumentSet();
+}
+
+async function ensureDocumentSetReady(): Promise<string | undefined> {
+  if (!uploadedFiles.value.length) {
+    return undefined;
+  }
+  if (documentSet.value?.status === "ready") {
+    return documentSet.value.document_set_id;
+  }
+
+  uploadStatus.value = "上传中：正在创建独立文档集…";
+  const created = await createDocumentSet();
+  uploadStatus.value = "解析中并构建语义索引…";
+  documentSet.value = await uploadDocumentSetFiles(
+    created.document_set_id,
+    uploadedFiles.value
+  );
+  if (documentSet.value.status !== "ready") {
+    throw new Error("文档集未准备完成，请稍后重试");
+  }
+  uploadStatus.value = "知识库就绪";
+  return documentSet.value.document_set_id;
+}
+
 function findTask(taskId: unknown): TodoTaskView | undefined {
   const numeric =
     typeof taskId === "number"
@@ -780,18 +923,23 @@ const handleSubmit = async () => {
 
   loading.value = true;
   error.value = "";
-  isExpanded.value = true;
   resetWorkflowState();
 
   const controller = new AbortController();
   currentController = controller;
 
-  const payload = {
-    topic: form.topic.trim(),
-    search_api: form.searchApi || undefined
-  };
-
   try {
+    const documentSetId = await ensureDocumentSetReady();
+    isExpanded.value = true;
+    const mode = effectiveResearchMode.value;
+    const payload = {
+      topic: form.topic.trim(),
+      research_mode: mode,
+      document_set_id: documentSetId,
+      search_api:
+        mode !== "document" ? form.searchApi || undefined : undefined
+    };
+
     await runResearchStream(
       payload,
       (event: ResearchStreamEvent) => {
@@ -808,6 +956,13 @@ const handleSubmit = async () => {
             task.notices.push(message);
             applyNoteMetadata(task, payload);
           }
+          return;
+        }
+
+        if (event.type === "research_mode") {
+          const mode =
+            typeof event.mode === "string" ? event.mode : effectiveResearchMode.value;
+          progressLogs.value.push(`研究范围已锁定：${formatResearchMode(mode)}`);
           return;
         }
 
@@ -921,6 +1076,9 @@ const handleSubmit = async () => {
               pulse(sourcesHighlight);
             }
           } else if (status === "skipped") {
+            if (typeof event.summary === "string" && event.summary.trim()) {
+              task.summary = event.summary.trim();
+            }
             progressLogs.value.push(`任务跳过：${task.title}`);
           }
           return;
@@ -1128,6 +1286,9 @@ const startNewResearch = () => {
   isExpanded.value = false;
   form.topic = "";
   form.searchApi = "";
+  form.researchMode = "hybrid";
+  uploadedFiles.value = [];
+  resetDocumentSet();
 };
 
 onBeforeUnmount(() => {
@@ -1344,6 +1505,112 @@ select:focus {
   border-color: rgba(37, 99, 235, 0.65);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
   background: #ffffff;
+}
+
+.upload-card,
+.scope-card {
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.upload-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.upload-heading strong,
+.scope-card strong {
+  color: #334155;
+  font-size: 14px;
+}
+
+.upload-heading p,
+.scope-card p {
+  margin: 5px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.upload-button {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.upload-button input {
+  display: none;
+}
+
+.upload-list {
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.upload-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.upload-list button {
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.upload-status,
+.upload-stats {
+  color: #0369a1 !important;
+  font-weight: 600;
+}
+
+.scope-options {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scope-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.scope-options input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: #2563eb;
+}
+
+.scope-web {
+  color: #0369a1 !important;
 }
 
 .options {
