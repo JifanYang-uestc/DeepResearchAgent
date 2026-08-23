@@ -92,6 +92,19 @@ class Configuration(BaseModel):
         title="Knowledge Top K",
         description="Number of local chunks retrieved for each research task",
     )
+    knowledge_probe_top_k: int = Field(
+        default=3,
+        ge=1,
+        title="Knowledge Probe Top K",
+        description="Candidate count evaluated by the relevance gate",
+    )
+    knowledge_relevance_threshold: float = Field(
+        default=0.55,
+        ge=-1.0,
+        le=1.0,
+        title="Knowledge Relevance Threshold",
+        description="Calibrated cosine threshold for HelloAgents semantic candidates",
+    )
     knowledge_minimum_score: float = Field(
         default=0.0,
         title="Knowledge Minimum Score",
@@ -192,6 +205,8 @@ class Configuration(BaseModel):
             "knowledge_base_path": os.getenv("KNOWLEDGE_BASE_PATH"),
             "knowledge_index_path": os.getenv("KNOWLEDGE_INDEX_PATH"),
             "knowledge_top_k": os.getenv("KNOWLEDGE_TOP_K"),
+            "knowledge_probe_top_k": os.getenv("KNOWLEDGE_PROBE_TOP_K"),
+            "knowledge_relevance_threshold": os.getenv("KNOWLEDGE_RELEVANCE_THRESHOLD"),
             "knowledge_minimum_score": os.getenv("KNOWLEDGE_MINIMUM_SCORE"),
             "knowledge_chunk_size": os.getenv("KNOWLEDGE_CHUNK_SIZE"),
             "knowledge_chunk_overlap": os.getenv("KNOWLEDGE_CHUNK_OVERLAP"),

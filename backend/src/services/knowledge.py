@@ -40,11 +40,23 @@ class KnowledgeService:
     def retrieve(self, query: str) -> tuple[list[RetrievalResult], list[str]]:
         """Return local evidence plus non-fatal availability notices."""
 
-        if not self._config.enable_knowledge_rag:
-            return [], ["Knowledge RAG 已禁用，继续使用 Web Search。"]
+        results, notices, _ = self.retrieve_with_backend(query)
+        return results, notices
 
+    def retrieve_with_backend(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+    ) -> tuple[list[RetrievalResult], list[str], str]:
+        """Return candidates, notices, and the backend that produced them."""
+
+        if not self._config.enable_knowledge_rag:
+            return [], ["Knowledge RAG 已禁用，继续使用 Web Search。"], "disabled"
+
+        limit = top_k or self._config.knowledge_top_k
         try:
-            return self._backend.retrieve(query, self._config.knowledge_top_k), []
+            return self._backend.retrieve(query, limit), [], self._backend.name
         except Exception as exc:  # noqa: BLE001 - degradation boundary
             logger.warning(
                 "Knowledge backend %s unavailable; degrading to web search: %s",
@@ -54,20 +66,20 @@ class KnowledgeService:
             if self._fallback_backend is not None:
                 try:
                     results = self._fallback_backend.retrieve(
-                        query, self._config.knowledge_top_k
+                        query, limit
                     )
                     notice = (
                         f"Knowledge Backend {self._backend.name} 不可用，"
                         f"已回退到 {self._fallback_backend.name}：{exc}"
                     )
-                    return results, [notice]
+                    return results, [notice], self._fallback_backend.name
                 except Exception as fallback_exc:  # noqa: BLE001 - fallback boundary
                     logger.warning(
                         "Fallback knowledge backend %s unavailable: %s",
                         self._fallback_backend.name,
                         fallback_exc,
                     )
-            return [], [f"Knowledge RAG 不可用，已退化到 Web Search：{exc}"]
+            return [], [f"Knowledge RAG 不可用，已退化到 Web Search：{exc}"], "none"
 
     def get_catalog(self) -> tuple[list[KnowledgeDocumentInfo], list[str]]:
         """Return catalog metadata without exposing backend details upstream."""
