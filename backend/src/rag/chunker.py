@@ -73,5 +73,5 @@ def _find_boundary(text: str, start: int, target_end: int, chunk_size: int) -> i
 
 
 def _chunk_id(page: DocumentPage, start: int, end: int, content: str) -> str:
-    identity = f"{page.source_path}|{page.page}|{start}|{end}|{content}".encode("utf-8")
+    identity = f"{page.source_path}|{page.page}|{start}|{end}|{content}".encode()
     return hashlib.sha256(identity).hexdigest()[:20]

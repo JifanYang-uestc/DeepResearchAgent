@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List
 
 CHARS_PER_TOKEN = 4
 

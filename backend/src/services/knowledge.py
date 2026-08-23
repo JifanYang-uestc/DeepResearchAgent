@@ -3,85 +3,114 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from threading import Lock
 
 from config import Configuration
-from rag.chunker import chunk_documents
-from rag.loader import load_documents
-from rag.retriever import KnowledgeRetriever
+from rag.base import KnowledgeBackend, KnowledgeDocumentInfo
+from rag.helloagents_backend import HelloAgentsSemanticBackend
+from rag.legacy_faiss_backend import LegacyFaissBackend
 from rag.types import RetrievalResult
-from rag.vector_store import FaissVectorStore
 
 logger = logging.getLogger(__name__)
-BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class KnowledgeService:
     """Load/build the local index once and degrade safely on failure."""
 
-    def __init__(self, config: Configuration) -> None:
+    def __init__(
+        self,
+        config: Configuration,
+        backend: KnowledgeBackend | None = None,
+        fallback_backend: KnowledgeBackend | None = None,
+    ) -> None:
         self._config = config
-        self._retriever: KnowledgeRetriever | None = None
-        self._lock = Lock()
+        if backend is not None:
+            self._backend = backend
+            self._fallback_backend = fallback_backend
+        elif config.knowledge_backend == "helloagents":
+            self._backend = HelloAgentsSemanticBackend(config)
+            self._fallback_backend = fallback_backend or LegacyFaissBackend(config)
+        elif config.knowledge_backend == "legacy_faiss":
+            self._backend = LegacyFaissBackend(config)
+            self._fallback_backend = fallback_backend
+        else:
+            raise ValueError(
+                "KNOWLEDGE_BACKEND must be 'helloagents' or 'legacy_faiss'"
+            )
 
     def retrieve(self, query: str) -> tuple[list[RetrievalResult], list[str]]:
         """Return local evidence plus non-fatal availability notices."""
 
+        results, notices, _ = self.retrieve_with_backend(query)
+        return results, notices
+
+    def retrieve_with_backend(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+    ) -> tuple[list[RetrievalResult], list[str], str]:
+        """Return candidates, notices, and the backend that produced them."""
+
         if not self._config.enable_knowledge_rag:
-            return [], ["Knowledge RAG 已禁用，继续使用 Web Search。"]
+            return [], ["Knowledge RAG 已禁用，继续使用 Web Search。"], "disabled"
 
+        limit = top_k or self._config.knowledge_top_k
         try:
-            retriever = self._get_retriever()
-            return retriever.retrieve(query), []
+            return self._backend.retrieve(query, limit), [], self._backend.name
         except Exception as exc:  # noqa: BLE001 - degradation boundary
-            logger.warning("Knowledge RAG unavailable; degrading to web search: %s", exc)
-            return [], [f"Knowledge RAG 不可用，已退化到 Web Search：{exc}"]
-
-    def _get_retriever(self) -> KnowledgeRetriever:
-        if self._retriever is not None:
-            return self._retriever
-
-        with self._lock:
-            if self._retriever is not None:
-                return self._retriever
-
-            index_path = _resolve_backend_path(self._config.knowledge_index_path)
-            store = FaissVectorStore()
-            try:
-                store.load(index_path)
-            except (FileNotFoundError, ValueError):
-                if not self._config.knowledge_auto_build:
-                    raise
-                knowledge_path = _resolve_backend_path(self._config.knowledge_base_path)
-                pages = load_documents(knowledge_path)
-                chunks = chunk_documents(
-                    pages,
-                    chunk_size=self._config.knowledge_chunk_size,
-                    chunk_overlap=self._config.knowledge_chunk_overlap,
-                )
-                store.build(chunks)
-                store.save(index_path)
-                logger.info(
-                    "Built local knowledge index: pages=%s chunks=%s path=%s",
-                    len(pages),
-                    len(chunks),
-                    index_path,
-                )
-
-            self._retriever = KnowledgeRetriever(
-                store,
-                top_k=self._config.knowledge_top_k,
-                minimum_score=self._config.knowledge_minimum_score,
+            logger.warning(
+                "Knowledge backend %s unavailable; degrading to web search: %s",
+                self._backend.name,
+                exc,
             )
-            return self._retriever
+            if self._fallback_backend is not None:
+                try:
+                    results = self._fallback_backend.retrieve(
+                        query, limit
+                    )
+                    notice = (
+                        f"Knowledge Backend {self._backend.name} 不可用，"
+                        f"已回退到 {self._fallback_backend.name}：{exc}"
+                    )
+                    return results, [notice], self._fallback_backend.name
+                except Exception as fallback_exc:  # noqa: BLE001 - fallback boundary
+                    logger.warning(
+                        "Fallback knowledge backend %s unavailable: %s",
+                        self._fallback_backend.name,
+                        fallback_exc,
+                    )
+            return [], [f"Knowledge RAG 不可用，已退化到 Web Search：{exc}"], "none"
 
+    def get_catalog(self) -> tuple[list[KnowledgeDocumentInfo], list[str]]:
+        """Return catalog metadata without exposing backend details upstream."""
 
-def _resolve_backend_path(value: str) -> Path:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    working_path = (Path.cwd() / path).resolve()
-    if working_path.exists():
-        return working_path
-    return (BACKEND_DIR / path).resolve()
+        if not self._config.enable_knowledge_rag:
+            return [], ["Knowledge RAG 已禁用，Knowledge Catalog 不可用。"]
+        try:
+            return self._backend.get_catalog(), []
+        except Exception as exc:  # noqa: BLE001 - degradation boundary
+            logger.warning("Knowledge catalog unavailable: %s", exc)
+            if self._fallback_backend is not None:
+                try:
+                    catalog = self._fallback_backend.get_catalog()
+                    return catalog, [
+                        f"Knowledge Catalog 已回退到 {self._fallback_backend.name}：{exc}"
+                    ]
+                except Exception as fallback_exc:  # noqa: BLE001
+                    logger.warning("Fallback knowledge catalog unavailable: %s", fallback_exc)
+            return [], [f"Knowledge Catalog 不可用：{exc}"]
+
+    def prepare(self) -> tuple[bool, list[str]]:
+        """Load or build the configured primary backend for setup commands."""
+
+        if not self._config.enable_knowledge_rag:
+            return False, ["Knowledge RAG 已禁用，无法准备索引。"]
+        if self._backend.health_check():
+            return True, []
+        return False, [f"Knowledge Backend {self._backend.name} 准备失败，请检查日志。"]
+
+    @property
+    def backend_name(self) -> str:
+        """Expose the configured backend name for diagnostics."""
+
+        return self._backend.name

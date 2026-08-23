@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from config import Configuration
+from rag.base import KnowledgeDocumentInfo
+from rag.types import KnowledgeChunk, RetrievalResult
 from services.knowledge import KnowledgeService
 
 
@@ -17,6 +19,7 @@ def test_service_auto_builds_and_reuses_index(tmp_path: Path) -> None:
     )
     index_path = tmp_path / "vector_store"
     config = Configuration(
+        knowledge_backend="legacy_faiss",
         knowledge_base_path=str(knowledge_base),
         knowledge_index_path=str(index_path),
         knowledge_chunk_size=200,
@@ -37,6 +40,7 @@ def test_service_auto_builds_and_reuses_index(tmp_path: Path) -> None:
 
 def test_missing_knowledge_base_degrades_without_raising(tmp_path: Path) -> None:
     config = Configuration(
+        knowledge_backend="legacy_faiss",
         knowledge_base_path=str(tmp_path / "missing"),
         knowledge_index_path=str(tmp_path / "missing-index"),
     )
@@ -46,3 +50,70 @@ def test_missing_knowledge_base_degrades_without_raising(tmp_path: Path) -> None
     assert results == []
     assert len(notices) == 1
     assert "退化到 Web Search" in notices[0]
+
+
+class FailingBackend:
+    name = "helloagents"
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def retrieve(self, query: str, top_k: int):
+        raise RuntimeError(self.message)
+
+    def health_check(self) -> bool:
+        return False
+
+    def get_catalog(self):
+        raise RuntimeError(self.message)
+
+
+class WorkingLegacyBackend:
+    name = "legacy_faiss"
+
+    def retrieve(self, query: str, top_k: int):
+        chunk = KnowledgeChunk(
+            chunk_id="legacy",
+            content="Legacy fallback evidence",
+            document="facts.txt",
+            source_path="facts.txt",
+            file_type="txt",
+            page=None,
+            start_char=0,
+            end_char=24,
+        )
+        return [RetrievalResult(1, 0.1, chunk)]
+
+    def health_check(self) -> bool:
+        return True
+
+    def get_catalog(self):
+        return [KnowledgeDocumentInfo("facts.txt", "txt", 1)]
+
+
+def test_semantic_embedding_failure_falls_back_to_legacy() -> None:
+    service = KnowledgeService(
+        Configuration(),
+        backend=FailingBackend("semantic embedding failure"),
+        fallback_backend=WorkingLegacyBackend(),
+    )
+
+    results, notices, backend = service.retrieve_with_backend("query")
+
+    assert results
+    assert backend == "legacy_faiss"
+    assert "semantic embedding failure" in notices[0]
+
+
+def test_vector_backend_unavailable_falls_back_to_legacy() -> None:
+    service = KnowledgeService(
+        Configuration(),
+        backend=FailingBackend("vector backend unavailable"),
+        fallback_backend=WorkingLegacyBackend(),
+    )
+
+    results, notices, backend = service.retrieve_with_backend("query")
+
+    assert results
+    assert backend == "legacy_faiss"
+    assert "vector backend unavailable" in notices[0]

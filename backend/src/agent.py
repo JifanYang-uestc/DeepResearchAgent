@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
+from time import perf_counter
 from typing import Any, Callable, Iterator
 
 from hello_agents import HelloAgentsLLM, ToolAwareSimpleAgent
@@ -14,16 +15,18 @@ from hello_agents.tools import ToolRegistry
 from hello_agents.tools.builtin.note_tool import NoteTool
 
 from config import Configuration
+from models import SummaryState, SummaryStateOutput, TodoItem
 from prompts import (
     report_writer_instructions,
     task_summarizer_instructions,
     todo_planner_system_prompt,
 )
-from models import SummaryState, SummaryStateOutput, TodoItem
-from services.planner import PlanningService
-from services.reporter import ReportingService
 from services.knowledge import KnowledgeService
+from services.planner import PlanningService
+from services.relevance_gate import KnowledgeRelevanceGate
+from services.reporter import ReportingService
 from services.research import gather_research_evidence
+from services.retrieval_router import AgentFactoryRouterProvider, RetrievalRouter
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
 
@@ -73,6 +76,19 @@ class DeepResearchAgent:
         self.summarizer = SummarizationService(self._summarizer_factory, self.config)
         self.reporting = ReportingService(self.report_agent, self.config)
         self.knowledge = KnowledgeService(self.config)
+        self.relevance_gate = KnowledgeRelevanceGate(self.config)
+        self.router = RetrievalRouter(
+            self.config,
+            AgentFactoryRouterProvider(
+                lambda: ToolAwareSimpleAgent(
+                    name="检索路由专家",
+                    llm=self.llm,
+                    system_prompt="根据任务上下文和 Knowledge Catalog 输出严格 JSON 检索路由。",
+                    enable_tool_calling=False,
+                    tool_registry=None,
+                )
+            ),
+        )
         self._last_search_notices: list[str] = []
 
     # ------------------------------------------------------------------
@@ -297,14 +313,47 @@ class DeepResearchAgent:
         step: int | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Run search + summarization for a single task."""
+        task_started = perf_counter()
         task.status = "in_progress"
+
+        catalog, catalog_notices = self.knowledge.get_catalog()
+        router_started = perf_counter()
+        decision = self.router.route(
+            research_topic=state.research_topic,
+            task=task,
+            knowledge_catalog=catalog,
+        )
+        router_latency_ms = (perf_counter() - router_started) * 1000
+        task.retrieval_route = decision.route.value
+        task.retrieval_reason = decision.reason
+        task.retrieval_confidence = decision.confidence
+        task.freshness_required = decision.freshness_required
+
+        if emit_stream:
+            yield {
+                "type": "retrieval_route",
+                "task_id": task.id,
+                "route": decision.route.value,
+                "reason": decision.reason,
+                "confidence": decision.confidence,
+                "freshness_required": decision.freshness_required,
+                "router_latency_ms": router_latency_ms,
+                "step": step,
+            }
 
         evidence = gather_research_evidence(
             task.query,
             self.config,
             state.research_loop_count,
             self.knowledge,
+            decision=decision,
+            relevance_gate=self.relevance_gate,
         )
+        evidence.notices = [*catalog_notices, *evidence.notices]
+        task.retrieval_metrics_ms = {
+            "router": router_latency_ms,
+            **evidence.timings_ms,
+        }
         self._last_search_notices = evidence.notices
         task.notices = evidence.notices
 
@@ -324,8 +373,22 @@ class DeepResearchAgent:
                         "step": step,
                     }
 
+        if evidence.gate_result and evidence.gate_result.rejected and emit_stream:
+            yield {
+                "type": "knowledge_rejected",
+                "task_id": task.id,
+                "reason": evidence.gate_result.reason,
+                "rejected_count": len(evidence.gate_result.rejected),
+                "accepted_count": len(evidence.gate_result.accepted),
+                "threshold": evidence.gate_result.threshold,
+                "step": step,
+            }
+
         if not evidence.available:
             task.status = "skipped"
+            task.retrieval_metrics_ms["total_task"] = (
+                perf_counter() - task_started
+            ) * 1000
             if emit_stream:
                 for event in self._drain_tool_events(state, step=step):
                     yield event
@@ -370,6 +433,10 @@ class DeepResearchAgent:
                 "step": step,
                 "backend": evidence.backend,
                 "sources": task.source_items,
+                "retrieval_route": task.retrieval_route,
+                "retrieval_reason": task.retrieval_reason,
+                "retrieval_confidence": task.retrieval_confidence,
+                "retrieval_metrics_ms": task.retrieval_metrics_ms,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
             }
@@ -397,6 +464,9 @@ class DeepResearchAgent:
 
         task.summary = summary_text.strip() if summary_text else "暂无可用信息"
         task.status = "completed"
+        task.retrieval_metrics_ms["total_task"] = (
+            perf_counter() - task_started
+        ) * 1000
 
         if emit_stream:
             for event in self._drain_tool_events(state, step=step):
@@ -408,6 +478,10 @@ class DeepResearchAgent:
                 "summary": task.summary,
                 "sources_summary": task.sources_summary,
                 "sources": task.source_items,
+                "retrieval_route": task.retrieval_route,
+                "retrieval_reason": task.retrieval_reason,
+                "retrieval_confidence": task.retrieval_confidence,
+                "retrieval_metrics_ms": task.retrieval_metrics_ms,
                 "note_id": task.note_id,
                 "note_path": task.note_path,
                 "step": step,
@@ -446,6 +520,11 @@ class DeepResearchAgent:
             "note_id": task.note_id,
             "note_path": task.note_path,
             "stream_token": task.stream_token,
+            "retrieval_route": task.retrieval_route,
+            "retrieval_reason": task.retrieval_reason,
+            "retrieval_confidence": task.retrieval_confidence,
+            "freshness_required": task.freshness_required,
+            "retrieval_metrics_ms": task.retrieval_metrics_ms,
         }
 
     def _persist_final_report(self, state: SummaryState, report: str) -> dict[str, Any] | None:

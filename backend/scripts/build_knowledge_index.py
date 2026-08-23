@@ -1,4 +1,4 @@
-"""Build the persisted local knowledge FAISS index."""
+"""Build the configured persistent Knowledge Backend index."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ SRC_DIR = BACKEND_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from rag.chunker import chunk_documents
-from rag.loader import load_documents
-from rag.vector_store import FaissVectorStore
+from config import Configuration
+from services.knowledge import KnowledgeService
 
 
 def main() -> None:
@@ -22,23 +21,37 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--knowledge-base", type=Path, default=BACKEND_DIR / "knowledge_base")
     parser.add_argument("--index-dir", type=Path, default=BACKEND_DIR / "vector_store")
+    parser.add_argument(
+        "--backend",
+        choices=("helloagents", "legacy_faiss"),
+        default=None,
+        help="Override KNOWLEDGE_BACKEND for this build",
+    )
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=120)
     args = parser.parse_args()
 
-    pages = load_documents(args.knowledge_base)
-    chunks = chunk_documents(
-        pages,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
+    config = Configuration.from_env(
+        overrides={
+            "knowledge_backend": args.backend,
+            "knowledge_base_path": str(args.knowledge_base),
+            "knowledge_index_path": str(args.index_dir),
+            "knowledge_chunk_size": args.chunk_size,
+            "knowledge_chunk_overlap": args.chunk_overlap,
+        }
     )
-    store = FaissVectorStore()
-    store.build(chunks)
-    store.save(args.index_dir)
-    print(
-        f"Indexed {store.size} chunks from {len(pages)} pages into "
-        f"{args.index_dir.resolve()}"
-    )
+    service = KnowledgeService(config)
+    ready, notices = service.prepare()
+    for notice in notices:
+        print(notice)
+    if not ready:
+        raise SystemExit(1)
+    catalog, catalog_notices = service.get_catalog()
+    for notice in catalog_notices:
+        print(notice)
+    print(f"Knowledge backend ready: {service.backend_name}")
+    print(f"Documents: {len(catalog)}")
+    print(f"Index root: {args.index_dir.resolve()}")
 
 
 if __name__ == "__main__":

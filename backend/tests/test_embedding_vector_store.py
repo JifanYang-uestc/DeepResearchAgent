@@ -11,7 +11,6 @@ from rag.embedding import HashingEmbedding
 from rag.loader import load_document
 from rag.vector_store import FaissVectorStore
 
-
 KNOWLEDGE_BASE = Path(__file__).resolve().parents[1] / "knowledge_base"
 
 

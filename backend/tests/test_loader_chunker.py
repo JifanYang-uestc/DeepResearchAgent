@@ -7,7 +7,6 @@ from pathlib import Path
 from rag.chunker import chunk_documents
 from rag.loader import load_document, load_documents
 
-
 KNOWLEDGE_BASE = Path(__file__).resolve().parents[1] / "knowledge_base"
 
 

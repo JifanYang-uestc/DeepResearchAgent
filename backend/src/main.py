@@ -6,17 +6,17 @@ import json
 import sys
 from typing import Any, Dict, Iterator, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import Configuration, SearchAPI
 from agent import DeepResearchAgent
+from config import Configuration, SearchAPI
 
 # 添加控制台日志处理程序
 logger.add(
@@ -101,8 +101,8 @@ def create_app() -> FastAPI:
             base_url = config.llm_base_url or "unset"
 
         logger.info(
-            "DeepResearch configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
-            "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s",
+            "DeepResearch configuration loaded: provider={} model={} base_url={} search_api={} "
+            "max_loops={} fetch_full_page={} tool_calling={} strip_thinking={} api_key={}",
             config.llm_provider,
             config.resolved_model() or "unset",
             base_url,
@@ -141,6 +141,11 @@ def create_app() -> FastAPI:
                 "sources": item.source_items,
                 "note_id": item.note_id,
                 "note_path": item.note_path,
+                "retrieval_route": item.retrieval_route,
+                "retrieval_reason": item.retrieval_reason,
+                "retrieval_confidence": item.retrieval_confidence,
+                "freshness_required": item.freshness_required,
+                "retrieval_metrics_ms": item.retrieval_metrics_ms,
             }
             for item in result.todo_items
         ]

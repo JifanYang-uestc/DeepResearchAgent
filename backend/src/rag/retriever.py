@@ -33,7 +33,7 @@ class KnowledgeRetriever:
         top_k: int = 5,
         minimum_score: float = 0.0,
         embedding: HashingEmbedding | None = None,
-    ) -> "KnowledgeRetriever":
+    ) -> KnowledgeRetriever:
         """Load a persisted index and construct a retriever."""
 
         store = FaissVectorStore(embedding)

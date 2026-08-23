@@ -51,6 +51,31 @@ class Configuration(BaseModel):
         title="Enable Knowledge RAG",
         description="Retrieve evidence from the local knowledge base",
     )
+    knowledge_backend: str = Field(
+        default="helloagents",
+        title="Knowledge Backend",
+        description="Knowledge backend: helloagents or legacy_faiss",
+    )
+    embedding_provider: str = Field(
+        default="local_transformer",
+        title="Embedding Provider",
+        description="Semantic embedding provider used by the HelloAgents backend",
+    )
+    embedding_model: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        title="Embedding Model",
+        description="Verified multilingual local SentenceTransformer model",
+    )
+    enable_advanced_rag_search: bool = Field(
+        default=False,
+        title="Enable Advanced RAG Search",
+        description="Reserved switch for HelloAgents MQE/HyDE; disabled in V0.3",
+    )
+    enable_retrieval_router: bool = Field(
+        default=True,
+        title="Enable Retrieval Router",
+        description="Route each TODO across Knowledge, Web, or Hybrid retrieval",
+    )
     knowledge_base_path: str = Field(
         default="./knowledge_base",
         title="Knowledge Base Path",
@@ -66,6 +91,19 @@ class Configuration(BaseModel):
         ge=1,
         title="Knowledge Top K",
         description="Number of local chunks retrieved for each research task",
+    )
+    knowledge_probe_top_k: int = Field(
+        default=3,
+        ge=1,
+        title="Knowledge Probe Top K",
+        description="Candidate count evaluated by the relevance gate",
+    )
+    knowledge_relevance_threshold: float = Field(
+        default=0.55,
+        ge=-1.0,
+        le=1.0,
+        title="Knowledge Relevance Threshold",
+        description="Calibrated cosine threshold for HelloAgents semantic candidates",
     )
     knowledge_minimum_score: float = Field(
         default=0.0,
@@ -159,9 +197,16 @@ class Configuration(BaseModel):
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
             "enable_knowledge_rag": os.getenv("ENABLE_KNOWLEDGE_RAG"),
+            "knowledge_backend": os.getenv("KNOWLEDGE_BACKEND"),
+            "embedding_provider": os.getenv("EMBEDDING_PROVIDER"),
+            "embedding_model": os.getenv("EMBEDDING_MODEL"),
+            "enable_advanced_rag_search": os.getenv("ENABLE_ADVANCED_RAG_SEARCH"),
+            "enable_retrieval_router": os.getenv("ENABLE_RETRIEVAL_ROUTER"),
             "knowledge_base_path": os.getenv("KNOWLEDGE_BASE_PATH"),
             "knowledge_index_path": os.getenv("KNOWLEDGE_INDEX_PATH"),
             "knowledge_top_k": os.getenv("KNOWLEDGE_TOP_K"),
+            "knowledge_probe_top_k": os.getenv("KNOWLEDGE_PROBE_TOP_K"),
+            "knowledge_relevance_threshold": os.getenv("KNOWLEDGE_RELEVANCE_THRESHOLD"),
             "knowledge_minimum_score": os.getenv("KNOWLEDGE_MINIMUM_SCORE"),
             "knowledge_chunk_size": os.getenv("KNOWLEDGE_CHUNK_SIZE"),
             "knowledge_chunk_overlap": os.getenv("KNOWLEDGE_CHUNK_OVERLAP"),

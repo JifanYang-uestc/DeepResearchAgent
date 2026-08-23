@@ -36,7 +36,7 @@ class KnowledgeChunk:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "KnowledgeChunk":
+    def from_dict(cls, payload: dict[str, Any]) -> KnowledgeChunk:
         """Restore a chunk saved in index metadata."""
 
         return cls(**payload)

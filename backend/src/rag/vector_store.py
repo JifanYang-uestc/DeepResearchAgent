@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import faiss
 
-from .embedding import HashingEmbedding
 from .types import KnowledgeChunk, RetrievalResult
 
 INDEX_FILENAME = "knowledge.faiss"
@@ -16,11 +15,28 @@ METADATA_FILENAME = "metadata.json"
 INDEX_VERSION = 2
 
 
+class VectorEmbedding(Protocol):
+    """Embedding contract required by the FAISS persistence layer."""
+
+    dimensions: int
+
+    @property
+    def fingerprint(self) -> str:
+        """Return a stable model identity."""
+
+    def embed_many(self, texts: Any) -> Any:
+        """Embed a batch as a FAISS-compatible matrix."""
+
+
 class FaissVectorStore:
     """A persisted cosine-similarity FAISS index plus chunk metadata."""
 
-    def __init__(self, embedding: HashingEmbedding | None = None) -> None:
-        self.embedding = embedding or HashingEmbedding()
+    def __init__(self, embedding: VectorEmbedding | None = None) -> None:
+        if embedding is None:
+            from .embedding import HashingEmbedding
+
+            embedding = HashingEmbedding()
+        self.embedding = embedding
         self._index: Any | None = None
         self._chunks: list[KnowledgeChunk] = []
 
@@ -29,6 +45,12 @@ class FaissVectorStore:
         """Return the number of indexed chunks."""
 
         return len(self._chunks)
+
+    @property
+    def chunks(self) -> tuple[KnowledgeChunk, ...]:
+        """Expose immutable chunk metadata for catalog construction."""
+
+        return tuple(self._chunks)
 
     def build(self, chunks: list[KnowledgeChunk]) -> None:
         """Build a fresh inner-product index from normalized embeddings."""

@@ -11,7 +11,6 @@ from rag.loader import load_documents
 from rag.retriever import KnowledgeRetriever
 from rag.vector_store import FaissVectorStore
 
-
 KNOWLEDGE_BASE = Path(__file__).resolve().parents[1] / "knowledge_base"
 REQUIRED_PAPERS = ("rag_2020.pdf", "react.pdf", "self_rag.pdf")
 

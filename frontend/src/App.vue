@@ -224,6 +224,17 @@
               </div>
             </header>
 
+            <section v-if="currentTaskRoute" class="route-card">
+              <div class="route-card-head">
+                <span class="route-label">检索策略</span>
+                <strong class="route-value">{{ formatRoute(currentTaskRoute) }}</strong>
+                <span v-if="currentTaskRouteConfidence !== null" class="route-confidence">
+                  置信度 {{ (currentTaskRouteConfidence * 100).toFixed(0) }}%
+                </span>
+              </div>
+              <p v-if="currentTaskRouteReason">原因：{{ currentTaskRouteReason }}</p>
+            </section>
+
             <section v-if="currentTask && currentTask.notices.length" class="task-notices">
               <h4>系统提示</h4>
               <ul>
@@ -394,6 +405,10 @@ interface TodoTaskView {
   noteId: string | null;
   notePath: string | null;
   toolCalls: ToolCallLog[];
+  retrievalRoute: string;
+  retrievalReason: string;
+  retrievalConfidence: number | null;
+  retrievalMetricsMs: Record<string, number | null>;
 }
 
 const form = reactive({
@@ -459,6 +474,22 @@ const currentTaskNotePath = computed(() => currentTask.value?.notePath ?? "");
 const currentTaskToolCalls = computed(
   () => currentTask.value?.toolCalls ?? []
 );
+const currentTaskRoute = computed(() => currentTask.value?.retrievalRoute ?? "");
+const currentTaskRouteReason = computed(
+  () => currentTask.value?.retrievalReason ?? ""
+);
+const currentTaskRouteConfidence = computed(
+  () => currentTask.value?.retrievalConfidence ?? null
+);
+
+function formatRoute(route: string): string {
+  const labels: Record<string, string> = {
+    knowledge: "Knowledge",
+    web: "Web",
+    hybrid: "Hybrid"
+  };
+  return labels[route] ?? route;
+}
 
 const pulse = (flag: typeof summaryHighlight) => {
   flag.value = false;
@@ -716,6 +747,24 @@ function upsertTaskMetadata(task: TodoTaskView, payload: Record<string, unknown>
   if (typeof payload.query === "string" && payload.query.trim()) {
     task.query = payload.query.trim();
   }
+  if (typeof payload.retrieval_route === "string") {
+    task.retrievalRoute = payload.retrieval_route;
+  }
+  if (typeof payload.retrieval_reason === "string") {
+    task.retrievalReason = payload.retrieval_reason;
+  }
+  if (typeof payload.retrieval_confidence === "number") {
+    task.retrievalConfidence = payload.retrieval_confidence;
+  }
+  const metrics = ensureRecord(payload.retrieval_metrics_ms);
+  if (Object.keys(metrics).length) {
+    task.retrievalMetricsMs = Object.fromEntries(
+      Object.entries(metrics).map(([key, value]) => [
+        key,
+        typeof value === "number" ? value : null
+      ])
+    );
+  }
 }
 
 const handleSubmit = async () => {
@@ -808,7 +857,16 @@ const handleSubmit = async () => {
               notices: [],
               noteId,
               notePath,
-              toolCalls: []
+              toolCalls: [],
+              retrievalRoute:
+                typeof item.retrieval_route === "string" ? item.retrieval_route : "",
+              retrievalReason:
+                typeof item.retrieval_reason === "string" ? item.retrieval_reason : "",
+              retrievalConfidence:
+                typeof item.retrieval_confidence === "number"
+                  ? item.retrieval_confidence
+                  : null,
+              retrievalMetricsMs: {}
             } as TodoTaskView;
           });
 
@@ -865,6 +923,39 @@ const handleSubmit = async () => {
           } else if (status === "skipped") {
             progressLogs.value.push(`任务跳过：${task.title}`);
           }
+          return;
+        }
+
+        if (event.type === "retrieval_route") {
+          const payload = event as Record<string, unknown>;
+          const task = findTask(payload.task_id);
+          if (!task) {
+            return;
+          }
+          task.retrievalRoute =
+            typeof payload.route === "string" ? payload.route : "hybrid";
+          task.retrievalReason =
+            typeof payload.reason === "string" ? payload.reason : "";
+          task.retrievalConfidence =
+            typeof payload.confidence === "number" ? payload.confidence : null;
+          progressLogs.value.push(
+            `任务 ${task.id} 检索策略：${formatRoute(task.retrievalRoute)}`
+          );
+          return;
+        }
+
+        if (event.type === "knowledge_rejected") {
+          const payload = event as Record<string, unknown>;
+          const task = findTask(payload.task_id);
+          if (!task) {
+            return;
+          }
+          const reason =
+            typeof payload.reason === "string"
+              ? payload.reason
+              : "Knowledge Evidence 相关性不足";
+          task.notices.push(reason);
+          progressLogs.value.push(`任务 ${task.id} 已过滤弱相关本地证据`);
           return;
         }
 
@@ -1613,6 +1704,39 @@ select:focus {
   flex-direction: column;
   gap: 18px;
   box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.5);
+}
+
+.route-card {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.route-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.route-label,
+.route-confidence {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.route-value {
+  color: #2563eb;
+  font-size: 14px;
+}
+
+.route-card p {
+  margin: 8px 0 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .task-header {

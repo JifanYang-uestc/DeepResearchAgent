@@ -31,11 +31,11 @@
 在 `backend` 目录运行：
 
 ```powershell
-..\.venv\Scripts\python.exe scripts\build_knowledge_index.py
+.\.venv\Scripts\python.exe scripts\build_knowledge_index.py
 ```
 
 运行四个工程检索 Query 并查看 Rank、Score、Document、Page、Chunk ID、Content：
 
 ```powershell
-..\.venv\Scripts\python.exe scripts\debug_retrieval.py --top-k 1
+.\.venv\Scripts\python.exe scripts\debug_retrieval.py --top-k 1
 ```
