@@ -30,6 +30,12 @@ class FaissVectorStore:
 
         return len(self._chunks)
 
+    @property
+    def chunks(self) -> tuple[KnowledgeChunk, ...]:
+        """Expose immutable chunk metadata for catalog construction."""
+
+        return tuple(self._chunks)
+
     def build(self, chunks: list[KnowledgeChunk]) -> None:
         """Build a fresh inner-product index from normalized embeddings."""
 
