@@ -10,7 +10,7 @@ import numpy as np
 
 from config import Configuration
 
-from .base import KnowledgeDocumentInfo
+from .base import KnowledgeBuildResult, KnowledgeDocumentInfo
 from .catalog import build_knowledge_catalog
 from .chunker import chunk_documents
 from .legacy_faiss_backend import resolve_backend_path
@@ -112,6 +112,24 @@ class HelloAgentsSemanticBackend:
             resolve_backend_path(self._config.knowledge_base_path)
         )
 
+    def rebuild(self) -> KnowledgeBuildResult:
+        """Replace the semantic index from the current knowledge corpus."""
+
+        with self._lock:
+            if self._config.embedding_provider != "local_transformer":
+                raise ValueError(
+                    "V0.3 helloagents backend supports "
+                    "EMBEDDING_PROVIDER=local_transformer"
+                )
+            embedding = self._embedding or HelloAgentsLocalEmbedding(
+                self._config.embedding_model
+            )
+            store, result = self._build_store(embedding)
+            self._embedding = embedding
+            self._store = store
+            self._retriever = self._create_retriever(store)
+            return result
+
     def _get_retriever(self) -> KnowledgeRetriever:
         if self._retriever is not None:
             return self._retriever
@@ -135,28 +153,50 @@ class HelloAgentsSemanticBackend:
             except (FileNotFoundError, ValueError):
                 if not self._config.knowledge_auto_build:
                     raise
-                knowledge_path = resolve_backend_path(self._config.knowledge_base_path)
-                pages = load_documents(knowledge_path)
-                chunks = chunk_documents(
-                    pages,
-                    chunk_size=self._config.knowledge_chunk_size,
-                    chunk_overlap=self._config.knowledge_chunk_overlap,
-                )
-                store.build(chunks)
-                store.save(index_path)
-                logger.info(
-                    "Built semantic knowledge index: model=%s pages=%s chunks=%s path=%s",
-                    self._config.embedding_model,
-                    len(pages),
-                    len(chunks),
-                    index_path,
-                )
+                store, _ = self._build_store(embedding)
 
             self._embedding = embedding
             self._store = store
-            self._retriever = KnowledgeRetriever(
+            self._retriever = self._create_retriever(store)
+            return self._retriever
+
+    def _build_store(
+        self,
+        embedding: SemanticEmbedding,
+    ) -> tuple[FaissVectorStore, KnowledgeBuildResult]:
+        knowledge_path = resolve_backend_path(self._config.knowledge_base_path)
+        index_root = resolve_backend_path(self._config.knowledge_index_path)
+        index_path = index_root / SEMANTIC_INDEX_DIRECTORY
+        pages = load_documents(knowledge_path)
+        chunks = chunk_documents(
+            pages,
+            chunk_size=self._config.knowledge_chunk_size,
+            chunk_overlap=self._config.knowledge_chunk_overlap,
+        )
+        store = FaissVectorStore(embedding)
+        store.build(chunks)
+        store.save(index_path)
+        result = KnowledgeBuildResult(
+            backend=self.name,
+            document_count=len({page.source_path for page in pages}),
+            page_count=len(pages),
+            chunk_count=len(chunks),
+            index_path=str(index_path),
+        )
+        logger.info(
+            "Built semantic knowledge index: model=%s documents=%s pages=%s "
+            "chunks=%s path=%s",
+            self._config.embedding_model,
+            result.document_count,
+            result.page_count,
+            result.chunk_count,
+            result.index_path,
+        )
+        return store, result
+
+    def _create_retriever(self, store: FaissVectorStore) -> KnowledgeRetriever:
+        return KnowledgeRetriever(
                 store,
                 top_k=self._config.knowledge_top_k,
                 minimum_score=self._config.knowledge_minimum_score,
             )
-            return self._retriever

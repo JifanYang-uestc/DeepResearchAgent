@@ -41,17 +41,12 @@ def main() -> None:
         }
     )
     service = KnowledgeService(config)
-    ready, notices = service.prepare()
-    for notice in notices:
-        print(notice)
-    if not ready:
-        raise SystemExit(1)
-    catalog, catalog_notices = service.get_catalog()
-    for notice in catalog_notices:
-        print(notice)
-    print(f"Knowledge backend ready: {service.backend_name}")
-    print(f"Documents: {len(catalog)}")
-    print(f"Index root: {args.index_dir.resolve()}")
+    result = service.rebuild()
+    print(f"Knowledge backend rebuilt: {result.backend}")
+    print(f"Documents: {result.document_count}")
+    print(f"Pages: {result.page_count}")
+    print(f"Chunks: {result.chunk_count}")
+    print(f"Index: {result.index_path}")
 
 
 if __name__ == "__main__":

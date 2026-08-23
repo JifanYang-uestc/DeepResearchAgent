@@ -26,6 +26,17 @@ class KnowledgeDocumentInfo:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeBuildResult:
+    """Typed summary returned by an explicit corpus rebuild."""
+
+    backend: str
+    document_count: int
+    page_count: int
+    chunk_count: int
+    index_path: str
+
+
 @runtime_checkable
 class KnowledgeBackend(Protocol):
     """Backend contract kept behind :class:`KnowledgeService`."""
@@ -40,3 +51,6 @@ class KnowledgeBackend(Protocol):
 
     def get_catalog(self) -> list[KnowledgeDocumentInfo]:
         """Return a chunk-free summary of indexed documents."""
+
+    def rebuild(self) -> KnowledgeBuildResult:
+        """Replace the persisted index from the current knowledge corpus."""

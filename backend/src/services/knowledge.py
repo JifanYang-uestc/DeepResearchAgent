@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from config import Configuration
-from rag.base import KnowledgeBackend, KnowledgeDocumentInfo
+from rag.base import KnowledgeBackend, KnowledgeBuildResult, KnowledgeDocumentInfo
 from rag.helloagents_backend import HelloAgentsSemanticBackend
 from rag.legacy_faiss_backend import LegacyFaissBackend
 from rag.types import RetrievalResult
@@ -108,6 +108,13 @@ class KnowledgeService:
         if self._backend.health_check():
             return True, []
         return False, [f"Knowledge Backend {self._backend.name} 准备失败，请检查日志。"]
+
+    def rebuild(self) -> KnowledgeBuildResult:
+        """Explicitly replace the selected index from the current corpus."""
+
+        if not self._config.enable_knowledge_rag:
+            raise RuntimeError("Knowledge RAG is disabled; cannot rebuild the index")
+        return self._backend.rebuild()
 
     @property
     def backend_name(self) -> str:
