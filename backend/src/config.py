@@ -71,6 +71,11 @@ class Configuration(BaseModel):
         title="Enable Advanced RAG Search",
         description="Reserved switch for HelloAgents MQE/HyDE; disabled in V0.3",
     )
+    enable_retrieval_router: bool = Field(
+        default=True,
+        title="Enable Retrieval Router",
+        description="Route each TODO across Knowledge, Web, or Hybrid retrieval",
+    )
     knowledge_base_path: str = Field(
         default="./knowledge_base",
         title="Knowledge Base Path",
@@ -183,6 +188,7 @@ class Configuration(BaseModel):
             "embedding_provider": os.getenv("EMBEDDING_PROVIDER"),
             "embedding_model": os.getenv("EMBEDDING_MODEL"),
             "enable_advanced_rag_search": os.getenv("ENABLE_ADVANCED_RAG_SEARCH"),
+            "enable_retrieval_router": os.getenv("ENABLE_RETRIEVAL_ROUTER"),
             "knowledge_base_path": os.getenv("KNOWLEDGE_BASE_PATH"),
             "knowledge_index_path": os.getenv("KNOWLEDGE_INDEX_PATH"),
             "knowledge_top_k": os.getenv("KNOWLEDGE_TOP_K"),
