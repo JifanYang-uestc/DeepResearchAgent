@@ -1,64 +1,182 @@
-# DeepResearchAgent V0.3
+# DeepResearchAgent — User-Controlled Research Scope
 
-DeepResearchAgent 是一个 TODO 驱动的深度研究助手。V0.3 在稳定的
-`v0.2-knowledge-rag` 基础上增量加入 HelloAgents Semantic Embedding、
-Knowledge / Web / Hybrid 自适应路由和 Knowledge Relevance Gate。
+DeepResearchAgent 是一个 TODO 驱动的深度研究助手。当前版本在 V0.3 Semantic RAG
+基础上把“允许使用哪些信息源”交给用户，并为每次上传创建隔离的 Session RAG。
 
-## V0.3 解决的问题
+## 思路转变
 
-V0.2 的每个 TODO 都会执行本地 Top-K 检索和 Web Search。Top-K 只能保证
-“最靠前”，不能保证“足够相关”，因此机器人趋势等域外问题也可能把
-`rag_2020.pdf`、`react.pdf` 或 `self_rag.pdf` 写入最终报告。
+V0.3 使用自动 TODO 级 Router 决定 Knowledge / Web / Hybrid。实际审查表明，freshness、
+年份、文件名和全局主题会让 Router 同时承担“用户权限”和“证据相关性”两种职责。
 
-V0.3 使用：
+当前版本明确拆分为三层：
 
 ```text
-Route First
-    +
-Semantic Retrieve
-    +
-Gate Evidence
+ResearchMode   → 用户允许哪些信息源
+Relevance Gate → 上传文档中的哪些 Chunk 足够相关
+Agent          → Planner → TODO → Evidence → Summary → Report
 ```
 
-先决定该查 Knowledge、Web 还是两者，再过滤相关性不足的本地候选。
+LLM Router 不再能够扩大用户允许的信息源。它保留为未来可选的 Hybrid 成本/延迟优化器。
 
 ## 架构
 
 ```text
-User
- ↓
-Planner
- ↓
-TODO
- ↓
-Adaptive Retrieval Router
- ↓
-┌───────────┬───────────┬────────────┐
-│ Knowledge │ Web       │ Hybrid     │
-└─────┬─────┴─────┬─────┴─────┬──────┘
-      ↓           ↓           ↓
-Semantic RAG    Tavily      Both
-      ↓                       ↓
-Knowledge Relevance Gate ←────┘
-             ↓
-      Unified Evidence
-             ↓
-        Summarizer
-             ↓
-        Report Writer
-             ↓
-          SSE / Vue
+                    User
+                      ↓
+               Research Topic
+                      +
+             Uploaded Documents
+                      +
+                Research Mode
+                      ↓
+       ┌──────────────┼──────────────┐
+       ↓              ↓              ↓
+      Web          Document        Hybrid
+       ↓              ↓              ↓
+   Web Search     Session RAG    Session RAG + Web
+                      ↓              ↓
+                Relevance Gate ←─────┘
+                      ↓
+                   Planner
+                      ↓
+                    TODO
+                      ↓
+               Unified Evidence
+                      ↓
+                 Summarizer
+                      ↓
+                Report Writer
+                      ↓
+                  SSE / Vue
 ```
 
-`KnowledgeService` 仍是稳定边界。默认 `helloagents` 后端复用项目原有的
-PDF/TXT/Markdown Loader、页码元数据、Chunker 和 FAISS 持久化，只将 V0.2
-的 HashingEmbedding 替换为 HelloAgents 官方 `LocalTransformerEmbedding`。
-V0.2 `HashingEmbedding + FAISS` 保留为 `legacy_faiss` 回退后端。
+实际执行中 Planner 先把主题拆成 TODO，然后每个 TODO 在 ResearchMode 允许的范围内收集
+证据。上传后的解析、Embedding 和索引构建在研究开始前完成。
+
+## 用户模式
+
+| 用户状态 | Mode | Document | Web |
+|---|---|---:|---:|
+| 未上传文件 | Web | No | Yes |
+| 上传文件 + 文档与互联网 | Hybrid | Yes | Yes |
+| 上传文件 + 仅文档 | Document | Yes | No |
+
+### Web Only
+
+不创建 KnowledgeService，不加载 Semantic Embedding，不打开 FAISS，也不读取 Catalog。
+
+### Document Only
+
+只检索当前 `document_set_id` 的独立索引，候选必须通过 Relevance Gate。即使查询包含
+“2026”“最新”等词也永不调用 Web。证据不足时返回：
+
+```text
+当前上传文档未提供足够证据支持该结论。
+```
+
+### Hybrid
+
+第一版对每个 TODO 同时允许 Document 和 Web。Document 候选仍必须通过 Gate；弱相关
+Chunk 被拒绝后，Web 可以继续。来源在用户界面中分别显示为 Document 和 Web。
+
+## 上传与隔离
+
+支持：`.pdf`、`.txt`、`.md`、`.markdown`。
+
+默认限制：最多 10 个文件、单文件 20 MiB、文档集总计 50 MiB。服务端会清除目录语义、
+拒绝不支持的扩展，并逐文件解析；一个坏 PDF 不会隐藏其它有效文件。如果所有文件都为空
+或不可解析，则不会构建空索引。
+
+```text
+backend/runtime/document_sets/
+└── <uuid>/
+    ├── document_set.json
+    ├── files/
+    │   └── uploaded.md
+    └── index/
+        └── helloagents-semantic/
+            ├── knowledge.faiss
+            └── metadata.json
+```
+
+每个 Document Set 使用 UUID 和独立 FAISS。请求中不存在全局
+`CURRENT_DOCUMENT_SET`；Retriever 缓存以 `document_set_id` 为键、线程安全且有容量上限。
+服务重启后直接加载持久化索引，不自动重新生成 Embedding。
+
+Runtime、上传文件和索引都被 `.gitignore` 排除。
+
+## API
+
+创建文档集：
+
+```http
+POST /knowledge/document-sets
+```
+
+上传并自动构建索引：
+
+```http
+POST /knowledge/document-sets/{document_set_id}/files
+Content-Type: multipart/form-data
+```
+
+查询状态：
+
+```http
+GET /knowledge/document-sets/{document_set_id}
+```
+
+成功响应示例：
+
+```json
+{
+  "document_set_id": "a UUID",
+  "status": "ready",
+  "documents": 3,
+  "pages": 82,
+  "chunks": 417,
+  "files": [],
+  "notices": []
+}
+```
+
+研究请求：
+
+```json
+{
+  "topic": "分析这些论文并结合最新资料研究 Agentic RAG",
+  "research_mode": "hybrid",
+  "document_set_id": "a ready UUID",
+  "search_api": "tavily"
+}
+```
+
+`document` 和 `hybrid` 必须绑定 ready 文档集，否则返回 4xx。`web` 会忽略
+`document_set_id`，并保持 Knowledge 完全懒加载。同步 `/research` 与 SSE
+`/research/stream` 使用相同的任务、证据和报告语义。SSE 新增：
+
+```json
+{"type":"research_mode","mode":"hybrid","document_set_id":"..."}
+```
+
+## 数据边界
+
+> Local Semantic Embedding 不等于 Fully Local Research。
+
+- 文档解析、Embedding 和 FAISS 检索在本地执行。
+- Document Only 保证不调用 Web Search。
+- 如果 Summarizer / Report Writer 配置为外部 LLM，被 Gate 接受的 Document Chunk 会发送
+  给该 LLM Provider 进行总结。
+- Document Only 的“No Web”不表示“No external LLM processing”。若要求完全离线，应同时
+  配置 Ollama/LMStudio 等本地 LLM。
+- Hybrid 会把 Web 查询发送给配置的搜索服务，并把被接受的 Document/Web Evidence 提供
+  给 Summarizer。
+
+不要上传 `.env`、API Key 或其它秘密作为参考资料。
 
 ## 环境准备
 
-要求 Python 3.10+、Node.js 18+。首次安装和模型下载需要网络，之后模型与
-索引均可从本地缓存加载。
+需要 Python 3.10+、Node.js 18+：
 
 ```powershell
 cd backend
@@ -66,90 +184,27 @@ uv sync --all-groups
 Copy-Item .env.example .env
 ```
 
-在 `.env` 中填写自己的 LLM 和搜索配置。`.env`、API Key、模型缓存、PDF
-和向量索引都不会提交到 Git。
-
-默认本地语义模型经过实际 CPU 加载与检索验证：
-
-```text
-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-```
-
-## V0.3 配置
+核心配置：
 
 ```env
-# Knowledge Backend
-KNOWLEDGE_BACKEND=helloagents
-
-# Semantic Embedding
 EMBEDDING_PROVIDER=local_transformer
 EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-
-# Adaptive Retrieval
-ENABLE_RETRIEVAL_ROUTER=True
-
-# Relevance Gate
 KNOWLEDGE_PROBE_TOP_K=3
 KNOWLEDGE_RELEVANCE_THRESHOLD=0.55
-
-# V0.3 不启用 MQE / HyDE
-ENABLE_ADVANCED_RAG_SEARCH=False
+DOCUMENT_SETS_ROOT=./runtime/document_sets
+MAX_UPLOAD_FILES=10
+MAX_UPLOAD_FILE_SIZE=20971520
+MAX_UPLOAD_TOTAL_SIZE=52428800
+DOCUMENT_INDEX_CACHE_SIZE=8
+CORS_ORIGINS=http://localhost:5173
 ```
 
-切换回 V0.2 后端：
+`build_knowledge_index.py` 保留给手工兼容模式。其优先级为：显式 CLI > `.env` > 默认值。
+默认 Semantic 后端不再自动回退到可能陈旧的 Legacy 索引；Legacy 只能显式选择：
 
 ```env
 KNOWLEDGE_BACKEND=legacy_faiss
 ```
-
-0.55 来自当前 RAG/ReAct/Self-RAG 真实语料校准：域内 Top-1 为
-0.6821–0.7398，域外 Top-1 为 0.3577–0.4198。不同模型或语料应重新运行
-调试脚本校准，不要照搬阈值。
-
-## 构建与调试知识库
-
-真实论文下载说明和校验值见
-[Knowledge Base 说明](backend/knowledge_base/README.md)。PDF 保存在本地但不进入 Git。
-
-```powershell
-cd backend
-$env:PYTHONUTF8='1'
-.\.venv\Scripts\python.exe scripts\build_knowledge_index.py
-.\.venv\Scripts\python.exe scripts\debug_semantic_retrieval.py
-```
-
-`build_knowledge_index.py` 是显式重建命令，不是健康检查：每次执行都会从当前
-`knowledge_base/` 重新加载文件、分块、生成 Embedding、替换 FAISS 与 metadata，
-并刷新当前 Backend 的缓存 Retriever。添加、替换或删除 Knowledge 文件后必须再次
-执行该命令。输出包含 Backend、Documents、Pages、Chunks 和最终 Index 路径。
-
-调试输出会显示 Backend、Gate 决策、Accept/Reject、Score、Document、Page、
-Chunk ID 和 Content。Semantic 索引位于
-`backend/vector_store/helloagents-semantic/`，重启后直接加载。
-
-Windows 上如果 Transformers/PyTorch 在加载本地模型时出现原生线程访问冲突，可在
-测试或构建前临时使用顺序权重加载：
-
-```powershell
-$env:HF_DEACTIVATE_ASYNC_LOAD='1'
-$env:OMP_NUM_THREADS='1'
-$env:MKL_NUM_THREADS='1'
-```
-
-## 三类路由
-
-- Knowledge：任务明确涉及 Catalog 中的文档或稳定理论，且不要求最新信息；只检索本地知识。
-- Web：任务具有时效性且 Catalog 没有直接匹配资料；只调用 Web Search。
-- Hybrid：本地文档可提供理论背景，同时问题需要当前互联网信息；执行两路并过滤本地候选。
-
-Router 输入包含完整研究主题、任务标题、意图、查询、当前日期和
-Knowledge Catalog。结构化 LLM Router 超时、异常或返回无效 JSON 时，会执行
-确定性回退。Web-only 不执行 Knowledge Retrieval；Knowledge-only 在有效本地
-证据存在时不调用 Web。
-
-Web Search 返回值在进入 Summarizer 和前端前会经过统一信任边界：仅保留结构正确的
-结果、限制条目与文本大小，并只接受不含嵌入凭据的 HTTP(S) 来源链接。Catalog 匹配
-同时忽略 `industry`、`market`、`report` 等通用词，避免仅因报告类词汇产生跨领域命中。
 
 ## 启动
 
@@ -169,75 +224,52 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:5173`。每个任务会显示检索策略、原因、置信度、系统
-notice，以及 Knowledge / Web 来源。SSE 保留 V0.2 事件并新增：
-
-```text
-retrieval_route
-knowledge_rejected
-```
-
-任务数据同时记录 Router、Knowledge Retrieval、Web Search 和 Total Task
-实际耗时，便于诊断而不编造 Benchmark。
+打开 `http://localhost:5173`，填写研究主题；不上传文件时自动联网，上传文件后默认
+“文档 + 互联网”，也可以选择“仅使用上传文档”。
 
 ## 测试
 
-快速、确定性测试不访问 Tavily、真实 LLM、DashScope 或公网 Qdrant：
+默认测试不调用真实 LLM、Tavily，也不下载模型：
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m pytest tests -q
 .\.venv\Scripts\python.exe -m ruff check .
-```
 
-显式运行本地模型与真实论文语料的三案例验收：
-
-```powershell
-$env:RUN_SEMANTIC_LIVE='1'
-.\.venv\Scripts\python.exe -m pytest tests\live\test_v03_semantic_cases.py -q
-```
-
-前端：
-
-```powershell
 cd ..\frontend
 npm run build
 ```
 
-## Demo A — Knowledge
+本地 Semantic Live（需要模型已在本机可用）：
 
-```text
-ReAct 是如何结合 reasoning 与 acting 的？
+```powershell
+$env:RUN_SEMANTIC_LIVE='1'
+$env:HF_DEACTIVATE_ASYNC_LOAD='1'
+$env:OMP_NUM_THREADS='1'
+$env:MKL_NUM_THREADS='1'
+.\.venv\Scripts\python.exe -m pytest tests\live -q
 ```
 
-预期：`Route: Knowledge`，主要引用 `react.pdf`，保留 Page 和 Chunk ID。
+## 强制 Demo
 
-## Demo B — Web
+- Web：无文件，研究“2026 年机器人领域的发展趋势”——只有 Web。
+- Document：上传 `react.pdf`、`self_rag.pdf`，选择仅文档——没有 Web。
+- Hybrid：上传 RAG/ReAct/Self-RAG 论文并研究 2026 趋势——Document + Web。
+- Document Insufficient：只上传 `react.pdf`，查询全球机器人融资——不联网、不引用
+  `react.pdf`、明确资料不足。
+- Isolation：Set A 为 `react.pdf`，Set B 为 `robotics_report.pdf`——Research B 不出现 A。
 
-```text
-机器人领域当前的发展趋势是什么？
-```
+## 安全与已知限制
 
-预期：`Route: Web`。当前 Knowledge Catalog 只有 RAG / ReAct / Self-RAG，
-因此最终 Evidence 不应出现这些论文的 `[Knowledge]` 引用。
+服务端使用 `CORS_ORIGINS`，用户可见异常保持固定安全文本，日志会脱敏 Bearer、API Key、
+authorization、secret-token 和 URL 内嵌凭据。启动日志只记录 `api_key=configured|unset`。
 
-## Demo C — Hybrid
+当前没有 BM25、RRF、Reranker、Reflection、RAGAS、Langfuse、Qdrant、Redis、Celery、
+多用户认证或数据库；不支持 OCR、DOCX、PPTX、XLSX、ZIP、URL 导入。Document Set 暂无
+自动过期清理和删除 UI。Embedding 构建当前在上传请求中同步完成，大文件会等待较久。
 
-```text
-从传统 RAG 到 Agentic RAG：对比 RAG、ReAct、Self-RAG，
-并结合 2026 年互联网资料分析最新发展。
-```
+开发记录：
 
-预期：`Route: Hybrid`，Evidence 同时包含 `[Knowledge]` 和 `[Web]`。
-
-## Compatibility 与范围
-
-HelloAgents 0.2.9 RAG API、Qdrant 版本、结构化返回和 metadata 调查见
-[V0.3 Compatibility Spike](docs/v0.3-rag-compatibility.md)。
-完整开发结果、回归、验收与已知限制见
-[V0.3 Development Summary](V0.3_DEVELOPMENT_SUMMARY.md)。
-审查问题的修复结果见
-[V0.3 Review Fix Summary](V0.3_REVIEW_FIX_SUMMARY.md)。
-
-V0.3 到此停止，不包含 BM25、RRF、Reranker、Reflection Agent、自动研究循环、
-RAGAS/DeepEval、前端文件上传、认证或数据库。
+- [V0.3 Round-Two Fix Summary](V0.3_ROUND2_FIX_SUMMARY.md)
+- [User-Controlled Research Scope Development Summary](USER_CONTROLLED_RESEARCH_SCOPE_DEVELOPMENT_SUMMARY.md)
+- [V0.3 Compatibility](docs/v0.3-rag-compatibility.md)
