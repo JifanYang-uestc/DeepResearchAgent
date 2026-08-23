@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, Optional, Tuple
+from urllib.parse import urlsplit
 
 from hello_agents.tools import SearchTool
 
 from config import Configuration
 from services.user_messages import WEB_PROVIDER_NOTICE
 from utils import (
+    CHARS_PER_TOKEN,
     deduplicate_and_format_sources,
     format_sources,
     get_config_value,
@@ -19,6 +22,8 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS_PER_SOURCE = 2000
+MAX_RESULTS = 5
+MAX_TEXT_CHARS = MAX_TOKENS_PER_SOURCE * CHARS_PER_TOKEN
 
 
 @lru_cache(maxsize=1)
@@ -53,21 +58,8 @@ def dispatch_search(
         logger.exception("Search backend %s failed: %s", search_api, exc)
         raise
 
-    if isinstance(raw_response, str):
-        logger.warning("Search backend %s returned text notice: %s", search_api, raw_response)
-        notices = [WEB_PROVIDER_NOTICE]
-        payload: dict[str, Any] = {
-            "results": [],
-            "backend": search_api,
-            "answer": None,
-            "notices": notices,
-        }
-    else:
-        payload = raw_response
-        provider_notices = list(payload.get("notices") or [])
-        for notice in provider_notices:
-            logger.warning("Search backend %s notice: %s", search_api, notice)
-        notices = [WEB_PROVIDER_NOTICE] if provider_notices else []
+    payload, response_issue = normalize_search_response(raw_response, search_api)
+    notices = [WEB_PROVIDER_NOTICE] if response_issue else []
 
     backend_label = str(payload.get("backend") or search_api)
     answer_text = payload.get("answer")
@@ -86,6 +78,130 @@ def dispatch_search(
     )
 
     return payload, notices, answer_text, backend_label
+
+
+def normalize_search_response(
+    raw_response: Any,
+    fallback_backend: str,
+) -> tuple[dict[str, Any], bool]:
+    """Validate untrusted search data before it reaches prompts or the frontend."""
+
+    if not isinstance(raw_response, Mapping):
+        logger.warning(
+            "Search backend %s returned an unsupported payload type: %s",
+            fallback_backend,
+            type(raw_response).__name__,
+        )
+        return _empty_search_payload(fallback_backend), True
+
+    response_issue = False
+    raw_backend = raw_response.get("backend")
+    backend = (
+        raw_backend.strip()
+        if isinstance(raw_backend, str) and raw_backend.strip()
+        else fallback_backend
+    )
+
+    raw_answer = raw_response.get("answer")
+    if raw_answer is not None and not isinstance(raw_answer, str):
+        response_issue = True
+    answer = _bounded_text(raw_answer) if isinstance(raw_answer, str) else None
+
+    raw_notices = raw_response.get("notices")
+    if raw_notices:
+        response_issue = True
+        notice_count = len(raw_notices) if isinstance(raw_notices, list) else 1
+        logger.warning(
+            "Search backend %s returned %s provider notice(s)",
+            fallback_backend,
+            notice_count,
+        )
+
+    raw_results = raw_response.get("results", [])
+    if not isinstance(raw_results, list):
+        logger.warning(
+            "Search backend %s returned non-list results",
+            fallback_backend,
+        )
+        raw_results = []
+        response_issue = True
+
+    if len(raw_results) > MAX_RESULTS:
+        response_issue = True
+
+    results: list[dict[str, str]] = []
+    for item in raw_results[:MAX_RESULTS]:
+        normalized = _normalize_search_result(item)
+        if normalized is None:
+            response_issue = True
+            continue
+        results.append(normalized)
+
+    return (
+        {
+            "results": results,
+            "backend": backend,
+            "answer": answer,
+            "notices": [],
+        },
+        response_issue,
+    )
+
+
+def _normalize_search_result(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, Mapping):
+        return None
+
+    url = _safe_web_url(value.get("url"))
+    if url is None:
+        return None
+
+    title = _bounded_text(value.get("title")) or url
+    content = _bounded_text(value.get("content"))
+    raw_content = _bounded_text(value.get("raw_content"))
+    return {
+        "title": title,
+        "url": url,
+        "content": content,
+        "raw_content": raw_content,
+    }
+
+
+def _safe_web_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > 2048:
+        return None
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None and not 1 <= port <= 65535
+    ):
+        return None
+    return candidate
+
+
+def _bounded_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:MAX_TEXT_CHARS]
+
+
+def _empty_search_payload(backend: str) -> dict[str, Any]:
+    return {
+        "results": [],
+        "backend": backend,
+        "answer": None,
+        "notices": [],
+    }
 
 
 def prepare_research_context(

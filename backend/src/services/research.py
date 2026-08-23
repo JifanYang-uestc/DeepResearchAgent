@@ -12,8 +12,12 @@ from rag.types import RetrievalResult
 from services.knowledge import KnowledgeService
 from services.relevance_gate import KnowledgeGateResult, KnowledgeRelevanceGate
 from services.retrieval_router import RetrievalRoute, RoutingDecision
-from services.search import dispatch_search, prepare_research_context
-from services.user_messages import WEB_UNAVAILABLE
+from services.search import (
+    dispatch_search,
+    normalize_search_response,
+    prepare_research_context,
+)
+from services.user_messages import WEB_PROVIDER_NOTICE, WEB_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +154,14 @@ def gather_research_evidence(
                 loop_count,
             )
             notices.extend(web_notices)
+            web_result, response_issue = normalize_search_response(
+                web_result,
+                web_backend,
+            )
+            if response_issue and WEB_PROVIDER_NOTICE not in notices:
+                notices.append(WEB_PROVIDER_NOTICE)
+            answer_text = web_result.get("answer")
+            web_backend = str(web_result.get("backend") or web_backend)
             if web_result and web_result.get("results"):
                 web_sources, web_context = prepare_research_context(
                     web_result,

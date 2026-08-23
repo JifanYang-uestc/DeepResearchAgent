@@ -230,3 +230,47 @@ def test_generic_filename_catalog_title_can_route_hybrid() -> None:
     assert decision.route is RetrievalRoute.HYBRID
     assert decision.knowledge_query == query
     assert "document1.pdf" in decision.reason
+
+
+def test_generic_catalog_words_do_not_create_cross_domain_match() -> None:
+    catalog = [
+        KnowledgeDocumentInfo(
+            document="document1.pdf",
+            file_type="pdf",
+            pages=42,
+            title="2026 Humanoid Robotics Industry Report",
+        )
+    ]
+    query = "2026 pharmaceutical industry market trends"
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=query,
+        task=_task(query),
+        knowledge_catalog=catalog,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route is RetrievalRoute.WEB
+    assert decision.knowledge_query is None
+
+
+def test_generic_only_catalog_title_is_not_a_domain_match() -> None:
+    catalog = [
+        KnowledgeDocumentInfo(
+            document="document1.pdf",
+            file_type="pdf",
+            pages=10,
+            title="2026 Industry Report",
+        )
+    ]
+    query = "latest pharmaceutical industry report"
+
+    decision = RetrievalRouter(Configuration()).route(
+        research_topic=query,
+        task=_task(query),
+        knowledge_catalog=catalog,
+        current_date="2026-08-23",
+    )
+
+    assert decision.route is RetrievalRoute.WEB
+    assert decision.knowledge_query is None

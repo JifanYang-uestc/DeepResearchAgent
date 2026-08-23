@@ -147,6 +147,10 @@ Knowledge Catalog。结构化 LLM Router 超时、异常或返回无效 JSON 时
 确定性回退。Web-only 不执行 Knowledge Retrieval；Knowledge-only 在有效本地
 证据存在时不调用 Web。
 
+Web Search 返回值在进入 Summarizer 和前端前会经过统一信任边界：仅保留结构正确的
+结果、限制条目与文本大小，并只接受不含嵌入凭据的 HTTP(S) 来源链接。Catalog 匹配
+同时忽略 `industry`、`market`、`report` 等通用词，避免仅因报告类词汇产生跨领域命中。
+
 ## 启动
 
 后端：

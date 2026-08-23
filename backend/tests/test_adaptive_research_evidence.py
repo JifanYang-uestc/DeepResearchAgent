@@ -152,3 +152,44 @@ def test_both_routes_unavailable_returns_no_evidence() -> None:
     assert not bundle.available
     assert bundle.sources == []
     assert any("Web Search 不可用" in notice for notice in bundle.notices)
+
+
+def test_untrusted_web_payload_is_validated_before_context() -> None:
+    knowledge = TrackingKnowledge([], [])
+
+    def untrusted_web(*args: object):
+        return (
+            {
+                "results": [
+                    {
+                        "title": "Unsafe source",
+                        "url": "javascript:alert(1)",
+                        "content": "must not reach the summarizer",
+                    },
+                    {
+                        "title": "Safe source",
+                        "url": "https://example.com/safe",
+                        "content": "Validated web evidence.",
+                    },
+                ],
+                "answer": "Validated direct answer.",
+            },
+            [],
+            "tuple answer must not bypass payload validation",
+            "tavily",
+        )
+
+    bundle = gather_research_evidence(
+        "current topic",
+        Configuration(fetch_full_page=False),
+        0,
+        knowledge,  # type: ignore[arg-type]
+        decision=_decision(RetrievalRoute.WEB, "current topic"),
+        web_search=untrusted_web,
+    )
+
+    assert [source.url for source in bundle.sources] == ["https://example.com/safe"]
+    assert "Validated direct answer." in bundle.context
+    assert "tuple answer must not bypass" not in bundle.context
+    assert "javascript:" not in bundle.context
+    assert any("Web Search 返回服务状态提示" in notice for notice in bundle.notices)

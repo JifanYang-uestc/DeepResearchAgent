@@ -205,15 +205,18 @@ ReAct 如何结合 reasoning 和 acting？
 
 | 检查 | 结果 |
 |---|---|
-| 后端快速测试 | `64 passed, 1 skipped` |
+| 后端快速测试 | `69 passed, 1 skipped` |
 | 真实本地模型和论文 live test | `1 passed` |
 | Ruff | `All checks passed!` |
 | Vue + TypeScript production build | 通过，14 modules transformed |
 | 机器人域外污染回归 | 通过，Route=Web，Knowledge sources=[] |
 | 本地 SSE E2E | 通过，最后事件为 `done` |
+| Web 外部响应信任边界 | 非 HTTP(S) URL 与非法结构在 Summarizer 前被拒绝 |
+| Catalog 通用词跨域污染 | 制药行业查询不会命中机器人行业报告 |
 | 常见 API Key 格式审计 | 当前文件 0、Git 历史 0 |
 
-唯一已知 warning 来自 HelloAgents 0.2.9 内部的 Pydantic V2 旧式 `Config`。
+已知 warning 来自 HelloAgents 0.2.9 内部的 Pydantic V2 旧式 `Config`，以及 FastAPI
+旧式 `on_event` 生命周期接口。
 
 ## 11. 本地复现命令
 
@@ -299,7 +302,8 @@ docs/v0.3-rag-compatibility.md，再检查其中列出的核心实现与测试�
 6. 会掩盖上述问题的缺失测试。
 7. 显式 rebuild 是否始终反映当前 corpus，且不会复用旧缓存 Retriever；
 8. Global freshness 是否仍可能覆盖理论 TODO；
-9. Catalog title、debug index 隔离和用户可见错误净化是否存在绕过路径。
+9. Catalog title、debug index 隔离和用户可见错误净化是否存在绕过路径；
+10. Web 外部响应是否可能通过非法结构、危险 URL 或旁路 direct answer 进入 Summarizer。
 
 请按交接文档第 13 节的格式报告。先列 Findings，并为每一项提供文件路径、行号、
 触发条件、影响和最小修复建议。不要把明确列为 V0.3 范围外的功能当作缺陷。

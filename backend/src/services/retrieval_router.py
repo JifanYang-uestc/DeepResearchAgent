@@ -20,11 +20,31 @@ from rag.base import KnowledgeDocumentInfo
 logger = logging.getLogger(__name__)
 
 _CATALOG_CONCEPT_ALIASES = (
-    ("robotics", "robot", "机器人"),
-    ("humanoid", "人形"),
-    ("industry", "行业", "产业"),
-    ("market", "市场"),
-    ("report", "报告"),
+    ("robotics", "robot", "robots", "机器人", "机器人学"),
+    ("humanoid", "humanoids", "人形", "人形机器人"),
+)
+_CATALOG_GENERIC_TERMS = frozenset(
+    {
+        "analysis",
+        "document",
+        "industry",
+        "market",
+        "paper",
+        "report",
+        "reports",
+        "research",
+        "study",
+        "trend",
+        "trends",
+        "产业",
+        "分析",
+        "市场",
+        "报告",
+        "文档",
+        "研究",
+        "行业",
+        "趋势",
+    }
 )
 
 
@@ -207,20 +227,10 @@ def _collect_signals(
 
 def _document_matches(text: str, entry: KnowledgeDocumentInfo) -> bool:
     stem = _normalize(Path(entry.document).stem)
-    aliases = {stem, stem.replace("_", " ").replace("-", " ")}
-    aliases.update(
-        part
-        for part in re.split(r"[^a-z0-9\u3400-\u9fff]+", stem)
-        if len(part) >= 3 and not part.isdigit()
-    )
+    aliases = _specific_aliases(stem)
     title = _normalize(entry.title or "")
     if title:
-        aliases.add(title)
-        aliases.update(
-            part
-            for part in re.split(r"[^a-z0-9\u3400-\u9fff]+", title)
-            if len(part) >= 3 and not part.isdigit()
-        )
+        aliases.update(_specific_aliases(title))
         for concept_group in _CATALOG_CONCEPT_ALIASES:
             if any(alias in title for alias in concept_group):
                 aliases.update(concept_group)
@@ -229,6 +239,30 @@ def _document_matches(text: str, entry: KnowledgeDocumentInfo) -> bool:
         and re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", text)
         for alias in aliases
     )
+
+
+def _specific_aliases(value: str) -> set[str]:
+    candidates = {
+        value,
+        value.replace("_", " ").replace("-", " "),
+        *re.split(r"[^a-z0-9\u3400-\u9fff]+", value),
+    }
+    return {
+        candidate
+        for candidate in candidates
+        if len(candidate) >= 3
+        and not candidate.isdigit()
+        and not _is_generic_alias(candidate)
+    }
+
+
+def _is_generic_alias(value: str) -> bool:
+    terms = [
+        term
+        for term in re.split(r"[^a-z0-9\u3400-\u9fff]+", value)
+        if term and not term.isdigit()
+    ]
+    return bool(terms) and all(term in _CATALOG_GENERIC_TERMS for term in terms)
 
 
 def _deterministic_decision(
