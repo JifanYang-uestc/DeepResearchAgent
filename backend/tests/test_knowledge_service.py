@@ -17,6 +17,7 @@ def test_service_auto_builds_and_reuses_index(tmp_path: Path) -> None:
     )
     index_path = tmp_path / "vector_store"
     config = Configuration(
+        knowledge_backend="legacy_faiss",
         knowledge_base_path=str(knowledge_base),
         knowledge_index_path=str(index_path),
         knowledge_chunk_size=200,
@@ -37,6 +38,7 @@ def test_service_auto_builds_and_reuses_index(tmp_path: Path) -> None:
 
 def test_missing_knowledge_base_degrades_without_raising(tmp_path: Path) -> None:
     config = Configuration(
+        knowledge_backend="legacy_faiss",
         knowledge_base_path=str(tmp_path / "missing"),
         knowledge_index_path=str(tmp_path / "missing-index"),
     )

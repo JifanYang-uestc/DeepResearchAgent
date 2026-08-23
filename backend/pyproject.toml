@@ -21,6 +21,7 @@ dependencies = [
     "loguru>=0.7.3",
     "huggingface-hub",
     "pypdf>=5.0.0",
+    "sentence-transformers>=6.0.0",
 ]
 
 [project.optional-dependencies]
